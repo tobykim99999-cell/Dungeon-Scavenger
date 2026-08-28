@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111315" />
+    <meta
+      name="description"
+      content="深渊拾荒者，一款随机地牢搜刮与风险撤离网页 Roguelike。"
+    />
+    <title>深渊拾荒者</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand-block">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1>深渊拾荒者</h1>
+            <p>每一次深入，都要决定何时收手</p>
+          </div>
+        </div>
+
+        <div class="run-stats" aria-label="本次探索状态">
+          <div class="stat-item">
+            <i data-lucide="layers-3" aria-hidden="true"></i>
+            <span>第 <strong id="floor-value">1</strong> 层</span>
+          </div>
+          <div class="stat-item hp-stat">
+            <i data-lucide="heart" aria-hidden="true"></i>
+            <div class="hp-track" aria-hidden="true"><span id="hp-fill"></span></div>
+            <strong id="hp-value">24 / 24</strong>
+          </div>
+          <div class="stat-item gold-stat">
+            <i data-lucide="coins" aria-hidden="true"></i>
+            <strong id="gold-value">0</strong>
+          </div>
+        </div>
+
+        <div class="toolbar">
+          <button id="mute-button" class="icon-button" type="button" title="切换声音" aria-label="切换声音">
+            <i data-lucide="volume-2" aria-hidden="true"></i>
+          </button>
+          <button id="restart-button" class="icon-button" type="button" title="重新开始" aria-label="重新开始">
+            <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+          </button>
+        </div>
+      </header>
+
+      <main class="game-layout">
+        <section class="play-column" aria-label="地牢区域">
+          <div id="game-stage">
+            <div id="run-modal" class="run-modal is-visible" role="dialog" aria-modal="true">
+              <div class="modal-emblem"><i data-lucide="lamp-wall-up" aria-hidden="true"></i></div>
+              <p id="modal-kicker">远征记录 · 001</p>
+              <h2 id="modal-title">准备下洞</h2>
+              <p id="modal-copy">火光之外没有承诺。带回来的，才真正属于你。</p>
+              <button id="start-button" class="primary-button" type="button">
+                <i data-lucide="door-open" aria-hidden="true"></i>
+                <span id="start-label">进入洞窟</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="touch-controls" aria-label="移动控制">
+            <span></span>
+            <button type="button" data-move="up" aria-label="向上"><i data-lucide="chevron-up"></i></button>
+            <span></span>
+            <button type="button" data-move="left" aria-label="向左"><i data-lucide="chevron-left"></i></button>
+            <button type="button" data-move="down" aria-label="向下"><i data-lucide="chevron-down"></i></button>
+            <button type="button" data-move="right" aria-label="向右"><i data-lucide="chevron-right"></i></button>
+          </div>
+        </section>
+
+        <aside class="side-panel">
+          <section class="panel-section equipment-section">
+            <div class="section-heading">
+              <h2>装备</h2>
+              <span id="combat-value">战力 5</span>
+            </div>
+            <div class="equipment-row">
+              <div class="equipment-icon weapon-icon"><i data-lucide="sword" aria-hidden="true"></i></div>
+              <div>
+                <span>武器</span>
+                <strong id="weapon-value">缺口短剑 · +2</strong>
+              </div>
+            </div>
+            <div class="equipment-row">
+              <div class="equipment-icon armor-icon"><i data-lucide="shield" aria-hidden="true"></i></div>
+              <div>
+                <span>护甲</span>
+                <strong id="armor-value">旧皮甲 · +1</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel-section bag-section">
+            <div class="section-heading">
+              <h2>行囊</h2>
+              <span id="bag-count">0 / 6</span>
+            </div>
+            <div id="bag-grid" class="bag-grid" aria-label="行囊物品"></div>
+          </section>
+
+          <section class="panel-section expedition-section">
+            <div class="section-heading">
+              <h2>远征</h2>
+              <span>已入库 <strong id="banked-value">0</strong></span>
+            </div>
+            <button id="escape-button" class="escape-button" type="button" disabled>
+              <i data-lucide="log-out" aria-hidden="true"></i>
+              <span>使用逃脱卷轴</span>
+            </button>
+          </section>
+
+          <section class="panel-section log-section" aria-live="polite">
+            <div class="section-heading"><h2>洞窟回声</h2></div>
+            <ol id="event-log" class="event-log"></ol>
+          </section>
+        </aside>
+      </main>
+
+      <footer>
+        <span>美术与音效：Kenney · CC0</span>
+        <span>本作与任何现有商业游戏无从属关系</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
