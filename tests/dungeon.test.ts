@@ -3,6 +3,7 @@ import {
   collectWalkableTiles,
   generateBossArena,
   generateDungeon,
+  generateTownMap,
   hasPath,
   MAP_HEIGHT,
   MAP_WIDTH,
@@ -38,6 +39,14 @@ describe('dungeon generation', () => {
     expect(arena.rooms).toHaveLength(1);
     expect(collectWalkableTiles(arena)).toHaveLength((MAP_WIDTH - 4) * (MAP_HEIGHT - 4));
     expect(hasPath(arena.tiles, arena.start, arena.exit)).toBe(true);
+  });
+
+  it('builds a compact connected town map', () => {
+    const town = generateTownMap();
+
+    expect(town.rooms).toHaveLength(1);
+    expect(collectWalkableTiles(town)).toHaveLength(18 * 12);
+    expect(hasPath(town.tiles, town.start, town.exit)).toBe(true);
   });
 });
 

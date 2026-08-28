@@ -24,7 +24,7 @@
         <div class="run-stats" aria-label="本次探索状态">
           <div class="stat-item">
             <i data-lucide="layers-3" aria-hidden="true"></i>
-            <span>第 <strong id="floor-value">1</strong> 层</span>
+            <strong id="area-value">灰炉镇</strong>
             <span id="boss-floor-marker" class="boss-floor-marker" aria-hidden="true">BOSS</span>
           </div>
           <div class="stat-item hp-stat">
@@ -57,6 +57,48 @@
                 <strong id="boss-hp">0 / 0</strong>
               </div>
               <div class="boss-health-track" aria-hidden="true"><span id="boss-health-fill"></span></div>
+            </div>
+            <div id="gilding-modal" class="gilding-modal" hidden role="dialog" aria-modal="true" aria-labelledby="gilding-title">
+              <button id="dismiss-gilding-button" class="modal-close" type="button" aria-label="关闭铭金祭台">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem"><i data-lucide="sparkles" aria-hidden="true"></i></div>
+              <p>洞窟遗物</p>
+              <h2 id="gilding-title">铭金祭台</h2>
+              <div id="gilding-options" class="gilding-options"></div>
+              <small>只有逃脱卷轴能将铭金装备带回地面</small>
+            </div>
+            <div id="town-loadout-modal" class="town-loadout-modal" hidden role="dialog" aria-modal="true" aria-labelledby="town-loadout-title">
+              <button id="dismiss-town-loadout-button" class="modal-close" type="button" aria-label="关闭装备箱">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem"><i data-lucide="archive" aria-hidden="true"></i></div>
+              <p>灰炉镇仓库</p>
+              <h2 id="town-loadout-title">远征配装</h2>
+              <div id="town-loadout-options" class="town-loadout-options"></div>
+            </div>
+            <div id="region-map-modal" class="region-map-modal" hidden role="dialog" aria-modal="true" aria-labelledby="region-map-title">
+              <button id="dismiss-region-map-button" class="modal-close" type="button" aria-label="关闭远征地图">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem map-emblem"><i data-lucide="map" aria-hidden="true"></i></div>
+              <p>已解锁区域</p>
+              <h2 id="region-map-title">远征地图</h2>
+              <div id="region-map-options" class="region-map-options"></div>
+            </div>
+            <div id="discard-modal" class="discard-modal" hidden role="dialog" aria-modal="true" aria-labelledby="discard-title">
+              <div class="discard-emblem"><i data-lucide="trash-2" aria-hidden="true"></i></div>
+              <p>行囊管理</p>
+              <h2 id="discard-title">确认丢弃</h2>
+              <strong id="discard-item-name"></strong>
+              <small id="discard-warning"></small>
+              <div class="discard-actions">
+                <button id="dismiss-discard-button" class="secondary-button" type="button">取消</button>
+                <button id="confirm-discard-button" class="danger-button" type="button">
+                  <i data-lucide="trash-2" aria-hidden="true"></i>
+                  丢弃
+                </button>
+              </div>
             </div>
             <div id="run-modal" class="run-modal is-visible" role="dialog" aria-modal="true">
               <div class="modal-emblem"><i data-lucide="lamp-wall-up" aria-hidden="true"></i></div>
@@ -123,6 +165,7 @@
               <i data-lucide="house" aria-hidden="true"></i>
               <span>安全回城</span>
             </button>
+            <div id="gilded-status" class="gilded-status" hidden></div>
           </section>
 
           <section class="panel-section log-section" aria-live="polite">

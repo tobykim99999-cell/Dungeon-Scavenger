@@ -4,6 +4,7 @@ import {
   createRandom,
   generateBossArena,
   generateDungeon,
+  generateTownMap,
   isWalkable,
   MAP_HEIGHT,
   MAP_WIDTH,
@@ -12,19 +13,46 @@ import {
   type RandomSource,
 } from './dungeon';
 import { computeFieldOfView } from './fov';
+import {
+  chooseAltarFloors,
+  chooseEscapeScrollFloor,
+  equipmentMatchesItem,
+  GILDED_LOADOUT_KEY,
+  GILDED_VAULT_KEY,
+  mergeGildedEquipment,
+  parseGildedLoadout,
+  parseGildedVault,
+  parseTownLoadout,
+  shouldPlaceEscapeScroll,
+  TOWN_LOADOUT_KEY,
+  type GildedLoadout,
+  type TownLoadoutSelection,
+  type VaultEquipment,
+} from './gilding';
 import { advanceStage, getBossStats } from './progression';
+import {
+  getRegion,
+  parseRegionProgress,
+  REGION_PROGRESS_KEY,
+  unlockRegion,
+} from './regions';
 import {
   COMMAND_EVENT,
   UI_EVENT,
+  type Altar,
   type Chest,
+  type DiscardCandidate,
   type Enemy,
   type Equipment,
   type GameCommand,
+  type GildingOption,
   type Item,
   type ItemType,
   type MoveDirection,
   type Rarity,
+  type RegionOption,
   type RunStatus,
+  type TownLoadoutOption,
   type UiState,
 } from './types';
 
@@ -32,6 +60,7 @@ const TILE_SIZE = 32;
 const INVENTORY_LIMIT = 6;
 const FOV_RADIUS = 7;
 const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
+const TOWN_CHEST = { x: 8, y: 10 };
 
 const ENEMY_TEMPLATES = [
   { name: '噬石虫', frame: 123, hp: 5, attack: 3, defense: 0, reward: 3 },
@@ -53,6 +82,7 @@ interface Step {
 
 export class GameScene extends Phaser.Scene {
   private status: RunStatus = 'waiting';
+  private inTown = false;
   private floor = 1;
   private gold = 0;
   private bankedGold = 0;
@@ -64,10 +94,22 @@ export class GameScene extends Phaser.Scene {
   private dungeon!: Dungeon;
   private enemies: Enemy[] = [];
   private chests: Chest[] = [];
+  private altar?: Altar;
+  private townChestSprite?: Phaser.GameObjects.Sprite;
   private explored = new Set<string>();
   private visible = new Set<string>();
   private bossStage = false;
   private bossDefeated = true;
+  private altarFloors = new Map<number, Set<number>>();
+  private gildingOptions: GildingOption[] | null = null;
+  private pendingGilded: GildedLoadout = {};
+  private vault: VaultEquipment[] = [];
+  private townLoadout: TownLoadoutSelection = {};
+  private townLoadoutOptions: TownLoadoutOption[] | null = null;
+  private regionOptions: RegionOption[] | null = null;
+  private discardCandidate: DiscardCandidate | null = null;
+  private highestUnlockedRegion = 0;
+  private escapeScrollFloor = 1;
   private random: RandomSource = createRandom(Date.now());
   private itemSerial = 0;
 
@@ -113,7 +155,7 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener(COMMAND_EVENT, this.commandListener);
     });
 
-    this.resetRun('waiting');
+    this.enterTown('远征者回到了灰炉镇。');
   }
 
   private bindKeyboard(): void {
@@ -138,16 +180,28 @@ export class GameScene extends Phaser.Scene {
       }
 
       if (/^Digit[1-6]$/.test(event.code)) {
-        this.useItem(Number(event.code.slice(-1)) - 1);
+        this.handleCommand({ action: 'use-item', index: Number(event.code.slice(-1)) - 1 });
       } else if (event.code === 'KeyE') {
-        this.escapeDungeon();
+        this.handleCommand({ action: 'escape' });
+      } else if (event.code === 'Escape') {
+        this.handleCommand({
+          action: this.discardCandidate
+            ? 'dismiss-discard'
+            : (this.regionOptions
+            ? 'dismiss-region-map'
+            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding')),
+        });
       }
     });
   }
 
   private handleCommand(command: GameCommand): void {
     if (command.action === 'start') {
-      this.resetRun('active');
+      this.enterTown('整备之后，再从矿门出发。');
+      return;
+    }
+    if (command.action === 'enter-town') {
+      this.enterTown('本次远征已经放弃。');
       return;
     }
     if (command.action === 'mute') {
@@ -155,7 +209,68 @@ export class GameScene extends Phaser.Scene {
       this.emitUiState();
       return;
     }
+    if (command.action === 'dismiss-region-map') {
+      this.regionOptions = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'start-region') {
+      this.startRegion(command.regionIndex);
+      return;
+    }
+    if (this.regionOptions) return;
+    if (command.action === 'dismiss-town-loadout') {
+      this.townLoadoutOptions = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'equip-town') {
+      this.equipTownItem(command.targetId);
+      return;
+    }
+    if (this.townLoadoutOptions) return;
+
+    if (this.status === 'town') {
+      if (command.action === 'move') {
+        const directions: Record<MoveDirection, Step> = {
+          up: { x: 0, y: -1 },
+          down: { x: 0, y: 1 },
+          left: { x: -1, y: 0 },
+          right: { x: 1, y: 0 },
+        };
+        this.attemptTownMove(directions[command.direction]);
+      }
+      return;
+    }
+
     if (this.status !== 'active') return;
+
+    if (command.action === 'dismiss-discard') {
+      this.discardCandidate = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'confirm-discard') {
+      this.confirmDiscard();
+      return;
+    }
+    if (this.discardCandidate) return;
+    if (command.action === 'request-discard') {
+      if (this.gildingOptions) return;
+      this.requestDiscard(command.index);
+      return;
+    }
+
+    if (command.action === 'dismiss-gilding') {
+      this.gildingOptions = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'gild-item') {
+      this.gildEquipment(command.targetId);
+      return;
+    }
+    if (this.gildingOptions) return;
 
     if (command.action === 'move') {
       const directions: Record<MoveDirection, Step> = {
@@ -174,18 +289,57 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private resetRun(status: RunStatus): void {
+  private resetRun(status: RunStatus, startFloor = 1): void {
     this.status = status;
-    this.floor = 1;
+    this.inTown = false;
+    this.floor = startFloor;
     this.bossStage = false;
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
-    this.weapon = { name: '缺口短剑', power: 2 };
-    this.armor = { name: '旧皮甲', power: 1 };
+    this.loadTownStorage();
+    this.applyTownLoadout();
     this.inventory = [];
+    this.pendingGilded = {};
+    this.gildingOptions = null;
+    this.townLoadoutOptions = null;
+    this.regionOptions = null;
+    this.discardCandidate = null;
+    this.altarFloors.clear();
     this.logEntries = status === 'active' ? ['铁门在身后合拢。'] : [];
     this.random = createRandom((Date.now() ^ 0xa51b3c7d) >>> 0);
+    this.escapeScrollFloor = chooseEscapeScrollFloor(startFloor, () => this.random.next());
     this.buildLevel();
+  }
+
+  private enterTown(message: string): void {
+    this.status = 'town';
+    this.inTown = true;
+    this.floor = 1;
+    this.bossStage = false;
+    this.bossDefeated = true;
+    this.gold = 0;
+    this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
+    this.inventory = [];
+    this.pendingGilded = {};
+    this.gildingOptions = null;
+    this.townLoadoutOptions = null;
+    this.regionOptions = null;
+    this.discardCandidate = null;
+    this.altarFloors.clear();
+    this.loadTownStorage();
+    this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.applyTownLoadout();
+    this.logEntries = [message];
+
+    this.clearLevel();
+    this.dungeon = generateTownMap();
+    this.player.x = this.dungeon.start.x;
+    this.player.y = this.dungeon.start.y;
+    this.explored = new Set<string>();
+    this.renderMap();
+    this.renderTownObjects();
+    this.updateVision();
+    this.emitUiState();
   }
 
   private buildLevel(): void {
@@ -212,13 +366,19 @@ export class GameScene extends Phaser.Scene {
     this.fogGraphics?.clear();
     this.enemies = [];
     this.chests = [];
+    this.altar = undefined;
+    this.townChestSprite = undefined;
+    this.gildingOptions = null;
+    this.discardCandidate = null;
   }
 
   private renderMap(): void {
     for (let y = 0; y < MAP_HEIGHT; y += 1) {
       for (let x = 0; x < MAP_WIDTH; x += 1) {
         const walkable = this.dungeon.tiles[y][x] === 1;
-        const floorColor = (x + y) % 2 === 0 ? 0x3f4744 : 0x3a423f;
+        const floorColor = this.inTown
+          ? ((x + y) % 2 === 0 ? 0x566159 : 0x4e5952)
+          : ((x + y) % 2 === 0 ? 0x3f4744 : 0x3a423f);
         const background = this.add
           .rectangle(x * TILE_SIZE + 16, y * TILE_SIZE + 16, TILE_SIZE, TILE_SIZE, walkable ? floorColor : 0x171c20)
           .setDepth(0);
@@ -234,7 +394,7 @@ export class GameScene extends Phaser.Scene {
           const wallTile = this.add
             .sprite(x * TILE_SIZE + 16, y * TILE_SIZE + 16, 'tiny-dungeon', 28)
             .setScale(2)
-            .setTint(0xaebbc0)
+            .setTint(this.inTown ? 0x8fa191 : 0xaebbc0)
             .setDepth(2);
           this.mapGroup.add(wallTile);
         }
@@ -249,6 +409,105 @@ export class GameScene extends Phaser.Scene {
       }
     }
     return false;
+  }
+
+  private renderTownObjects(): void {
+    this.exitSprite = this.add
+      .sprite(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 16, 'tiny-dungeon', 33)
+      .setScale(2.5)
+      .setTint(0xb8cfad)
+      .setDepth(5);
+    this.objectGroup.add(this.exitSprite);
+
+    this.townChestSprite = this.add
+      .sprite(TOWN_CHEST.x * TILE_SIZE + 16, TOWN_CHEST.y * TILE_SIZE + 16, 'tiny-dungeon', 72)
+      .setScale(2.2)
+      .setTint(0xe1b85c)
+      .setDepth(6);
+    this.objectGroup.add(this.townChestSprite);
+
+    const gateLabel = this.add
+      .text(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 48, '远征地图', {
+        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontSize: '12px',
+        color: '#dce7d5',
+        backgroundColor: '#263029',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(7);
+    const chestLabel = this.add
+      .text(TOWN_CHEST.x * TILE_SIZE + 16, TOWN_CHEST.y * TILE_SIZE + 46, '装备箱', {
+        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontSize: '12px',
+        color: '#f0dba7',
+        backgroundColor: '#302a1d',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(7);
+    this.objectGroup.addMultiple([gateLabel, chestLabel]);
+
+    for (const point of [{ x: 7, y: 6 }, { x: 21, y: 6 }, { x: 7, y: 14 }, { x: 21, y: 14 }]) {
+      const lantern = this.add
+        .sprite(point.x * TILE_SIZE + 16, point.y * TILE_SIZE + 16, 'tiny-dungeon', 29)
+        .setScale(2)
+        .setTint(0xf1c36a)
+        .setDepth(5);
+      this.objectGroup.add(lantern);
+    }
+
+    this.playerSprite = this.add
+      .sprite(this.player.x * TILE_SIZE + 16, this.player.y * TILE_SIZE + 16, 'tiny-dungeon', 87)
+      .setScale(2)
+      .setTint(0xf8efc4)
+      .setDepth(8);
+    this.actorGroup.add(this.playerSprite);
+  }
+
+  private attemptTownMove(step: Step): void {
+    const target = { x: this.player.x + step.x, y: this.player.y + step.y };
+    if (!isWalkable(this.dungeon.tiles, target)) return;
+    if (target.x === TOWN_CHEST.x && target.y === TOWN_CHEST.y) {
+      this.openTownLoadout();
+      return;
+    }
+    if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
+      this.openRegionMap();
+      return;
+    }
+
+    this.player.x = target.x;
+    this.player.y = target.y;
+    this.tweenToGrid(this.playerSprite, target);
+    this.playSound('step', 0.18);
+  }
+
+  private openRegionMap(): void {
+    this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.regionOptions = Array.from(
+      { length: this.highestUnlockedRegion + 1 },
+      (_, index) => getRegion(index),
+    );
+    this.emitUiState();
+  }
+
+  private startRegion(regionIndex: number): void {
+    if (
+      this.status !== 'town' ||
+      !this.regionOptions?.some((option) => option.index === regionIndex) ||
+      regionIndex > this.highestUnlockedRegion
+    ) {
+      return;
+    }
+    const region = getRegion(regionIndex);
+    this.regionOptions = null;
+    this.resetRun('active', region.startFloor);
+  }
+
+  private unlockRegionAtFloor(floor: number): void {
+    this.highestUnlockedRegion = unlockRegion(this.highestUnlockedRegion, floor);
+    localStorage.setItem(REGION_PROGRESS_KEY, String(this.highestUnlockedRegion));
   }
 
   private spawnLevelContent(): void {
@@ -305,15 +564,38 @@ export class GameScene extends Phaser.Scene {
     }
 
     const chestCount = Math.min(3 + Math.floor(this.floor / 2), 5);
+    const shouldOfferEscapeScroll = shouldPlaceEscapeScroll(
+      this.floor,
+      this.escapeScrollFloor,
+      this.inventory.some((item) => item.type === 'scroll'),
+      this.random.next(),
+    );
     for (let index = 0; index < chestCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
+      const holdsEscapeScroll = index === 0 && shouldOfferEscapeScroll;
       this.chests.push({
         id: `chest-${this.floor}-${index}`,
         x: position.x,
         y: position.y,
-        loot: index === 0 && !this.inventory.some((item) => item.type === 'scroll') ? this.createItem('scroll') : this.createLoot(),
+        loot: holdsEscapeScroll ? this.createItem('scroll') : this.createLoot(),
       });
     }
+
+    if (this.shouldSpawnAltar() && positions.length > 0) {
+      const position = positions.pop()!;
+      this.altar = { x: position.x, y: position.y, used: false };
+    }
+  }
+
+  private shouldSpawnAltar(): boolean {
+    if (this.bossStage) return false;
+    const blockStart = Math.floor((this.floor - 1) / 10) * 10 + 1;
+    let scheduled = this.altarFloors.get(blockStart);
+    if (!scheduled) {
+      scheduled = new Set(chooseAltarFloors(blockStart, () => this.random.next()));
+      this.altarFloors.set(blockStart, scheduled);
+    }
+    return scheduled.has(this.floor);
   }
 
   private renderActorsAndObjects(): void {
@@ -332,6 +614,16 @@ export class GameScene extends Phaser.Scene {
         .setTint(0xf0c56b)
         .setDepth(6);
       this.objectGroup.add(chest.sprite);
+    }
+
+    if (this.altar) {
+      this.altar.sprite = this.add
+        .sprite(this.altar.x * TILE_SIZE + 16, this.altar.y * TILE_SIZE + 16, 'tiny-dungeon', 32)
+        .setScale(2.4)
+        .setTint(0xe3bd61)
+        .setDepth(6);
+      this.objectGroup.add(this.altar.sprite);
+      this.tweens.add({ targets: this.altar.sprite, alpha: 0.72, duration: 850, yoyo: true, repeat: -1 });
     }
 
     for (const enemy of this.enemies) {
@@ -366,6 +658,11 @@ export class GameScene extends Phaser.Scene {
     if (chest) {
       this.openChest(chest);
       this.finishTurn();
+      return;
+    }
+
+    if (this.altar && !this.altar.used && this.altar.x === target.x && this.altar.y === target.y) {
+      this.openGildingAltar();
       return;
     }
 
@@ -517,14 +814,239 @@ export class GameScene extends Phaser.Scene {
     this.addItem(chest.loot);
   }
 
+  private openGildingAltar(): void {
+    const options: GildingOption[] = [];
+    if (!this.weapon.gilded) {
+      options.push({
+        targetId: 'equipped-weapon',
+        name: this.weapon.name,
+        type: 'weapon',
+        power: this.weapon.power,
+        source: 'equipped',
+      });
+    }
+    if (!this.armor.gilded) {
+      options.push({
+        targetId: 'equipped-armor',
+        name: this.armor.name,
+        type: 'armor',
+        power: this.armor.power,
+        source: 'equipped',
+      });
+    }
+    for (const item of this.inventory) {
+      if ((item.type === 'weapon' || item.type === 'armor') && !item.gilded) {
+        options.push({
+          targetId: item.id,
+          name: item.name,
+          type: item.type,
+          power: item.power,
+          source: 'inventory',
+        });
+      }
+    }
+
+    if (options.length === 0) {
+      this.pushLog('铭金祭台没有找到可铭刻的装备。');
+      this.emitUiState();
+      return;
+    }
+
+    this.gildingOptions = options;
+    this.pushLog('祭火升起，等待一件装备接受铭金。');
+    this.emitUiState();
+  }
+
+  private loadTownStorage(): void {
+    this.vault = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
+    this.townLoadout = parseTownLoadout(localStorage.getItem(TOWN_LOADOUT_KEY));
+
+    const legacy = parseGildedLoadout(localStorage.getItem(GILDED_LOADOUT_KEY));
+    const migrated = mergeGildedEquipment(this.vault, legacy);
+    if (migrated.added.length > 0) {
+      this.vault = migrated.vault;
+      for (const item of migrated.added) {
+        if (item.type === 'weapon' && !this.townLoadout.weaponId) this.townLoadout.weaponId = item.id;
+        if (item.type === 'armor' && !this.townLoadout.armorId) this.townLoadout.armorId = item.id;
+      }
+      this.persistTownStorage();
+    }
+
+    if (!this.vault.some((item) => item.id === this.townLoadout.weaponId && item.type === 'weapon')) {
+      delete this.townLoadout.weaponId;
+    }
+    if (!this.vault.some((item) => item.id === this.townLoadout.armorId && item.type === 'armor')) {
+      delete this.townLoadout.armorId;
+    }
+  }
+
+  private persistTownStorage(): void {
+    localStorage.setItem(GILDED_VAULT_KEY, JSON.stringify(this.vault));
+    localStorage.setItem(TOWN_LOADOUT_KEY, JSON.stringify(this.townLoadout));
+  }
+
+  private applyTownLoadout(): void {
+    const selectedWeapon = this.vault.find(
+      (item) => item.id === this.townLoadout.weaponId && item.type === 'weapon',
+    );
+    const selectedArmor = this.vault.find(
+      (item) => item.id === this.townLoadout.armorId && item.type === 'armor',
+    );
+    this.weapon = selectedWeapon
+      ? { ...selectedWeapon, gilded: true }
+      : { name: '缺口短剑', power: 2, rarity: 'common' };
+    this.armor = selectedArmor
+      ? { ...selectedArmor, gilded: true }
+      : { name: '旧皮甲', power: 1, rarity: 'common' };
+  }
+
+  private openTownLoadout(): void {
+    this.townLoadoutOptions = [
+      {
+        targetId: 'starter-weapon',
+        name: '缺口短剑',
+        type: 'weapon',
+        power: 2,
+        equipped: !this.townLoadout.weaponId,
+        starter: true,
+      },
+      {
+        targetId: 'starter-armor',
+        name: '旧皮甲',
+        type: 'armor',
+        power: 1,
+        equipped: !this.townLoadout.armorId,
+        starter: true,
+      },
+      ...this.vault.map((item) => ({
+        targetId: item.id,
+        name: item.name,
+        type: item.type,
+        power: item.power,
+        equipped: item.type === 'weapon'
+          ? this.townLoadout.weaponId === item.id
+          : this.townLoadout.armorId === item.id,
+        starter: false,
+      })),
+    ];
+    this.emitUiState();
+  }
+
+  private equipTownItem(targetId: string): void {
+    if (this.status !== 'town' || !this.townLoadoutOptions?.some((option) => option.targetId === targetId)) return;
+
+    if (targetId === 'starter-weapon') {
+      delete this.townLoadout.weaponId;
+    } else if (targetId === 'starter-armor') {
+      delete this.townLoadout.armorId;
+    } else {
+      const item = this.vault.find((candidate) => candidate.id === targetId);
+      if (!item) return;
+      if (item.type === 'weapon') this.townLoadout.weaponId = item.id;
+      else this.townLoadout.armorId = item.id;
+    }
+
+    this.persistTownStorage();
+    this.applyTownLoadout();
+    this.openTownLoadout();
+    this.pushLog('城镇配装已经更新。');
+    this.emitUiState();
+  }
+
+  private gildEquipment(targetId: string): void {
+    if (!this.gildingOptions?.some((option) => option.targetId === targetId) || !this.altar || this.altar.used) return;
+
+    let gilded: Equipment | undefined;
+    let type: 'weapon' | 'armor' | undefined;
+    if (targetId === 'equipped-weapon') {
+      this.weapon = { ...this.weapon, gilded: true };
+      gilded = { ...this.weapon };
+      type = 'weapon';
+    } else if (targetId === 'equipped-armor') {
+      this.armor = { ...this.armor, gilded: true };
+      gilded = { ...this.armor };
+      type = 'armor';
+    } else {
+      const item = this.inventory.find((candidate) => candidate.id === targetId);
+      if (item && (item.type === 'weapon' || item.type === 'armor')) {
+        item.gilded = true;
+        gilded = {
+          name: item.name,
+          power: item.power,
+          rarity: item.rarity,
+          gilded: true,
+        };
+        type = item.type;
+      }
+    }
+
+    if (!gilded || !type) return;
+    this.pendingGilded[type] = gilded;
+    this.altar.used = true;
+    if (this.altar.sprite) {
+      this.tweens.killTweensOf(this.altar.sprite);
+      this.altar.sprite.stop().setTint(0x756b56).setAlpha(0.55);
+    }
+    this.gildingOptions = null;
+    this.pushLog(`${gilded.name}已完成铭金，必须用逃脱卷轴带回地面。`);
+    this.playSound('coins', 0.42);
+    this.finishTurn();
+  }
+
   private addItem(item: Item): void {
     if (this.inventory.length >= INVENTORY_LIMIT) {
+      if (item.type === 'scroll') {
+        const abandoned = this.inventory.pop();
+        this.inventory.push(item);
+        this.pushLog(`为唯一的逃脱卷轴腾出位置，遗下了${abandoned?.name ?? '一件物品'}。`);
+        return;
+      }
       const salvage = Math.max(2, item.power);
       this.gold += salvage;
       this.pushLog(`行囊已满，将${item.name}拆换成 ${salvage} 枚古币。`);
       return;
     }
     this.inventory.push(item);
+  }
+
+  private requestDiscard(index: number): void {
+    const item = this.inventory[index];
+    if (!item) return;
+    this.discardCandidate = {
+      index,
+      name: item.name,
+      type: item.type,
+      gilded: Boolean(item.gilded),
+    };
+    this.emitUiState();
+  }
+
+  private confirmDiscard(): void {
+    if (!this.discardCandidate) return;
+    const item = this.inventory[this.discardCandidate.index];
+    if (!item) {
+      this.discardCandidate = null;
+      this.emitUiState();
+      return;
+    }
+
+    this.inventory.splice(this.discardCandidate.index, 1);
+    if (item.type === 'weapon' && equipmentMatchesItem(this.pendingGilded.weapon, item)) {
+      delete this.pendingGilded.weapon;
+    }
+    if (item.type === 'armor' && equipmentMatchesItem(this.pendingGilded.armor, item)) {
+      delete this.pendingGilded.armor;
+    }
+
+    this.discardCandidate = null;
+    if (item.type === 'scroll') {
+      this.pushLog('逃脱卷轴已被丢弃，后续普通层仍有机会再次发现。');
+    } else if (item.gilded) {
+      this.pushLog(`${item.name}已被丢弃；若它尚未带出，对应铭金记录也已取消。`);
+    } else {
+      this.pushLog(`${item.name}已从行囊中丢弃。`);
+    }
+    this.emitUiState();
   }
 
   private useItem(index: number): void {
@@ -545,14 +1067,14 @@ export class GameScene extends Phaser.Scene {
       this.playSound('equip', 0.35);
     } else if (item.type === 'weapon') {
       const old = this.weapon;
-      this.weapon = { name: item.name, power: item.power };
+      this.weapon = { name: item.name, power: item.power, rarity: item.rarity, gilded: item.gilded };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
       this.pushLog(`换上${item.name}，攻击提升至 ${this.totalAttack}。`);
       this.playSound('equip', 0.35);
     } else {
       const old = this.armor;
-      this.armor = { name: item.name, power: item.power };
+      this.armor = { name: item.name, power: item.power, rarity: item.rarity, gilded: item.gilded };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
       this.pushLog(`穿上${item.name}，防御提升至 ${this.totalDefense}。`);
@@ -572,29 +1094,37 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.inventory.splice(scrollIndex, 1);
+    this.saveGildedEquipment();
+    this.unlockRegionAtFloor(this.floor);
     this.completeReturn(`你带着 ${this.gold} 枚古币回到地面。`);
+  }
+
+  private saveGildedEquipment(): void {
+    if (!this.pendingGilded.weapon && !this.pendingGilded.armor) return;
+    const stored = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
+    const merged = mergeGildedEquipment(stored, this.pendingGilded);
+    this.vault = merged.vault;
+    localStorage.setItem(GILDED_VAULT_KEY, JSON.stringify(this.vault));
   }
 
   private returnToTown(): void {
     if (this.status !== 'active' || !this.bossStage || !this.bossDefeated) return;
+    this.unlockRegionAtFloor(this.floor);
     this.completeReturn(`守层远征完成，你安全带回 ${this.gold} 枚古币。`);
   }
 
   private completeReturn(message: string): void {
     this.bankedGold += this.gold;
     localStorage.setItem('abyss-banked-gold', String(this.bankedGold));
-    this.status = 'escaped';
-    this.pushLog(message);
     this.playSound('open', 0.5);
-    this.emitUiState();
+    this.enterTown(message);
   }
 
   private createLoot(): Item {
     const roll = this.random.next();
-    if (roll < 0.38) return this.createItem('potion');
-    if (roll < 0.67) return this.createItem('weapon');
-    if (roll < 0.9) return this.createItem('armor');
-    return this.createItem('scroll');
+    if (roll < 0.45) return this.createItem('potion');
+    if (roll < 0.73) return this.createItem('weapon');
+    return this.createItem('armor');
   }
 
   private createItem(type: ItemType, forcedRarity?: Rarity): Item {
@@ -629,12 +1159,13 @@ export class GameScene extends Phaser.Scene {
       name: equipment.name,
       description: `${type === 'weapon' ? '攻击' : '防御'} +${equipment.power}`,
       power: equipment.power,
-      rarity: 'common',
+      rarity: equipment.rarity ?? 'common',
+      gilded: equipment.gilded,
     };
   }
 
   private updateVision(): void {
-    if (this.bossStage) {
+    if (this.bossStage || this.inTown) {
       this.visible = new Set<string>();
       for (let y = 0; y < MAP_HEIGHT; y += 1) {
         for (let x = 0; x < MAP_WIDTH; x += 1) this.visible.add(`${x},${y}`);
@@ -708,9 +1239,14 @@ export class GameScene extends Phaser.Scene {
 
   private emitUiState(): void {
     const boss = this.enemies.find((enemy) => enemy.isBoss);
+    const pendingGilded = [this.pendingGilded.weapon, this.pendingGilded.armor].filter(
+      (equipment): equipment is Equipment => Boolean(equipment),
+    );
     const state: UiState = {
       status: this.status,
       floor: this.floor,
+      inTown: this.inTown,
+      areaLabel: this.inTown ? '灰炉镇' : (this.bossStage ? `第 ${this.floor} 层守门大殿` : `第 ${this.floor} 层`),
       hp: this.player.hp,
       maxHp: this.player.maxHp,
       attack: this.totalAttack,
@@ -724,6 +1260,11 @@ export class GameScene extends Phaser.Scene {
       muted: this.sound.mute,
       isBossFloor: this.bossStage,
       canReturnToTown: this.status === 'active' && this.bossStage && this.bossDefeated,
+      gildingOptions: this.gildingOptions?.map((option) => ({ ...option })) ?? null,
+      pendingGilded,
+      townLoadoutOptions: this.townLoadoutOptions?.map((option) => ({ ...option })) ?? null,
+      regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
+      discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
       boss: boss ? { name: boss.name, hp: boss.hp, maxHp: boss.maxHp } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));

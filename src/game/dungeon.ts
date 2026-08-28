@@ -162,6 +162,28 @@ export function generateBossArena(seed: number): Dungeon {
   };
 }
 
+export function generateTownMap(): Dungeon {
+  const tiles = Array.from({ length: MAP_HEIGHT }, () =>
+    Array.from({ length: MAP_WIDTH }, () => 0 as Tile),
+  );
+  const room: Room = {
+    x: 5,
+    y: 4,
+    width: 18,
+    height: 12,
+    center: { x: 14, y: 10 },
+  };
+  carveRoom(tiles, room);
+
+  return {
+    tiles,
+    rooms: [room],
+    start: { x: 14, y: 13 },
+    exit: { x: 14, y: 5 },
+    seed: 0,
+  };
+}
+
 export function isWalkable(tiles: Tile[][], point: Point): boolean {
   return Boolean(tiles[point.y]?.[point.x]);
 }
