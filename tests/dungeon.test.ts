@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectWalkableTiles,
+  generateBossArena,
   generateDungeon,
   hasPath,
   MAP_HEIGHT,
@@ -29,6 +30,14 @@ describe('dungeon generation', () => {
 
   it('repeats a map when given the same seed', () => {
     expect(generateDungeon(104729)).toEqual(generateDungeon(104729));
+  });
+
+  it('builds the boss stage as one large connected arena', () => {
+    const arena = generateBossArena(10);
+
+    expect(arena.rooms).toHaveLength(1);
+    expect(collectWalkableTiles(arena)).toHaveLength((MAP_WIDTH - 4) * (MAP_HEIGHT - 4));
+    expect(hasPath(arena.tiles, arena.start, arena.exit)).toBe(true);
   });
 });
 

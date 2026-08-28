@@ -25,6 +25,7 @@
           <div class="stat-item">
             <i data-lucide="layers-3" aria-hidden="true"></i>
             <span>第 <strong id="floor-value">1</strong> 层</span>
+            <span id="boss-floor-marker" class="boss-floor-marker" aria-hidden="true">BOSS</span>
           </div>
           <div class="stat-item hp-stat">
             <i data-lucide="heart" aria-hidden="true"></i>
@@ -50,6 +51,13 @@
       <main class="game-layout">
         <section class="play-column" aria-label="地牢区域">
           <div id="game-stage">
+            <div id="boss-encounter" class="boss-encounter" hidden aria-live="polite">
+              <div class="boss-heading">
+                <span id="boss-name">深渊典狱长</span>
+                <strong id="boss-hp">0 / 0</strong>
+              </div>
+              <div class="boss-health-track" aria-hidden="true"><span id="boss-health-fill"></span></div>
+            </div>
             <div id="run-modal" class="run-modal is-visible" role="dialog" aria-modal="true">
               <div class="modal-emblem"><i data-lucide="lamp-wall-up" aria-hidden="true"></i></div>
               <p id="modal-kicker">远征记录 · 001</p>
@@ -110,6 +118,10 @@
             <button id="escape-button" class="escape-button" type="button" disabled>
               <i data-lucide="log-out" aria-hidden="true"></i>
               <span>使用逃脱卷轴</span>
+            </button>
+            <button id="return-town-button" class="return-town-button" type="button" hidden>
+              <i data-lucide="house" aria-hidden="true"></i>
+              <span>安全回城</span>
             </button>
           </section>
 

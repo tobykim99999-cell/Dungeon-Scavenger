@@ -140,6 +140,28 @@ export function generateDungeon(seed: number): Dungeon {
   };
 }
 
+export function generateBossArena(seed: number): Dungeon {
+  const tiles = Array.from({ length: MAP_HEIGHT }, () =>
+    Array.from({ length: MAP_WIDTH }, () => 0 as Tile),
+  );
+  const room: Room = {
+    x: 2,
+    y: 2,
+    width: MAP_WIDTH - 4,
+    height: MAP_HEIGHT - 4,
+    center: { x: Math.floor(MAP_WIDTH / 2), y: Math.floor(MAP_HEIGHT / 2) },
+  };
+  carveRoom(tiles, room);
+
+  return {
+    tiles,
+    rooms: [room],
+    start: { x: room.center.x, y: room.y + room.height - 3 },
+    exit: { x: room.center.x, y: room.y + 4 },
+    seed,
+  };
+}
+
 export function isWalkable(tiles: Tile[][], point: Point): boolean {
   return Boolean(tiles[point.y]?.[point.x]);
 }

@@ -124,6 +124,18 @@ button:focus-visible {
   color: var(--text);
 }
 
+.boss-floor-marker {
+  width: 34px;
+  color: transparent;
+  font-size: 9px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.boss-floor-marker.is-visible {
+  color: var(--danger);
+}
+
 .hp-stat svg {
   color: var(--danger);
 }
@@ -209,6 +221,61 @@ button:focus-visible {
 
 #game-stage canvas {
   display: block;
+}
+
+.boss-encounter[hidden] {
+  display: none;
+}
+
+.boss-encounter {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 4;
+  width: min(360px, 68%);
+  padding: 9px 12px 11px;
+  border: 1px solid #724448;
+  border-radius: 4px;
+  background: rgba(15, 17, 19, 0.9);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.boss-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 7px;
+  font-size: 11px;
+}
+
+.boss-heading span {
+  overflow: hidden;
+  color: #f0d9d5;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.boss-heading strong {
+  color: #c8cfcb;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.boss-health-track {
+  height: 6px;
+  overflow: hidden;
+  background: #392528;
+}
+
+#boss-health-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--danger);
+  transition: width 120ms ease;
 }
 
 .run-modal {
@@ -472,7 +539,8 @@ button:focus-visible {
   font-size: 8px;
 }
 
-.escape-button {
+.escape-button,
+.return-town-button {
   width: 100%;
   min-height: 42px;
   display: flex;
@@ -486,6 +554,17 @@ button:focus-visible {
   cursor: pointer;
 }
 
+.return-town-button[hidden] {
+  display: none;
+}
+
+.return-town-button {
+  margin-top: 8px;
+  border-color: #8d7442;
+  color: #f0dfb8;
+  background: #282318;
+}
+
 .escape-button:disabled {
   border-color: #333a3d;
   color: #61696b;
@@ -493,7 +572,8 @@ button:focus-visible {
   cursor: not-allowed;
 }
 
-.escape-button svg {
+.escape-button svg,
+.return-town-button svg {
   width: 17px;
   height: 17px;
 }

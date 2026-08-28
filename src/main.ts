@@ -11,6 +11,7 @@ const getElement = <T extends HTMLElement>(id: string): T => {
 };
 
 const floorValue = getElement('floor-value');
+const bossFloorMarker = getElement('boss-floor-marker');
 const hpValue = getElement('hp-value');
 const hpFill = getElement('hp-fill');
 const goldValue = getElement('gold-value');
@@ -22,6 +23,7 @@ const bagCount = getElement('bag-count');
 const bagGrid = getElement('bag-grid');
 const eventLog = getElement<HTMLOListElement>('event-log');
 const escapeButton = getElement<HTMLButtonElement>('escape-button');
+const returnTownButton = getElement<HTMLButtonElement>('return-town-button');
 const muteButton = getElement<HTMLButtonElement>('mute-button');
 const restartButton = getElement<HTMLButtonElement>('restart-button');
 const startButton = getElement<HTMLButtonElement>('start-button');
@@ -30,6 +32,10 @@ const runModal = getElement('run-modal');
 const modalKicker = getElement('modal-kicker');
 const modalTitle = getElement('modal-title');
 const modalCopy = getElement('modal-copy');
+const bossEncounter = getElement('boss-encounter');
+const bossName = getElement('boss-name');
+const bossHp = getElement('boss-hp');
+const bossHealthFill = getElement('boss-health-fill');
 
 function sendCommand(command: GameCommand): void {
   window.dispatchEvent(new CustomEvent<GameCommand>(COMMAND_EVENT, { detail: command }));
@@ -101,6 +107,7 @@ function renderModal(state: UiState): void {
 
 function renderState(state: UiState): void {
   floorValue.textContent = String(state.floor);
+  bossFloorMarker.classList.toggle('is-visible', state.isBossFloor);
   hpValue.textContent = `${state.hp} / ${state.maxHp}`;
   hpFill.style.width = `${Math.max(0, (state.hp / state.maxHp) * 100)}%`;
   hpFill.classList.toggle('is-low', state.hp / state.maxHp <= 0.3);
@@ -110,6 +117,13 @@ function renderState(state: UiState): void {
   weaponValue.textContent = `${state.weapon.name} · +${state.weapon.power}`;
   armorValue.textContent = `${state.armor.name} · +${state.armor.power}`;
   bagCount.textContent = `${state.inventory.length} / 6`;
+
+  bossEncounter.hidden = !state.boss;
+  if (state.boss) {
+    bossName.textContent = state.boss.name;
+    bossHp.textContent = `${state.boss.hp} / ${state.boss.maxHp}`;
+    bossHealthFill.style.width = `${Math.max(0, (state.boss.hp / state.boss.maxHp) * 100)}%`;
+  }
 
   renderInventory(state.inventory);
   eventLog.replaceChildren(
@@ -122,6 +136,7 @@ function renderState(state: UiState): void {
 
   const hasScroll = state.inventory.some((item) => item.type === 'scroll');
   escapeButton.disabled = state.status !== 'active' || !hasScroll;
+  returnTownButton.hidden = !state.canReturnToTown;
   muteButton.innerHTML = `<i data-lucide="${state.muted ? 'volume-x' : 'volume-2'}" aria-hidden="true"></i>`;
   muteButton.setAttribute('aria-label', state.muted ? '开启声音' : '关闭声音');
   muteButton.title = state.muted ? '开启声音' : '关闭声音';
@@ -137,6 +152,7 @@ startButton.addEventListener('click', () => sendCommand({ action: 'start' }));
 restartButton.addEventListener('click', () => sendCommand({ action: 'start' }));
 muteButton.addEventListener('click', () => sendCommand({ action: 'mute' }));
 escapeButton.addEventListener('click', () => sendCommand({ action: 'escape' }));
+returnTownButton.addEventListener('click', () => sendCommand({ action: 'return-town' }));
 
 document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => {
   button.addEventListener('click', () => {

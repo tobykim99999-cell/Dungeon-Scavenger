@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import {
   collectWalkableTiles,
   createRandom,
+  generateBossArena,
   generateDungeon,
   isWalkable,
   MAP_HEIGHT,
@@ -11,6 +12,7 @@ import {
   type RandomSource,
 } from './dungeon';
 import { computeFieldOfView } from './fov';
+import { advanceStage, getBossStats } from './progression';
 import {
   COMMAND_EVENT,
   UI_EVENT,
@@ -64,6 +66,8 @@ export class GameScene extends Phaser.Scene {
   private chests: Chest[] = [];
   private explored = new Set<string>();
   private visible = new Set<string>();
+  private bossStage = false;
+  private bossDefeated = true;
   private random: RandomSource = createRandom(Date.now());
   private itemSerial = 0;
 
@@ -165,12 +169,15 @@ export class GameScene extends Phaser.Scene {
       this.useItem(command.index);
     } else if (command.action === 'escape') {
       this.escapeDungeon();
+    } else if (command.action === 'return-town') {
+      this.returnToTown();
     }
   }
 
   private resetRun(status: RunStatus): void {
     this.status = status;
     this.floor = 1;
+    this.bossStage = false;
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.weapon = { name: '缺口短剑', power: 2 };
@@ -184,15 +191,17 @@ export class GameScene extends Phaser.Scene {
   private buildLevel(): void {
     this.clearLevel();
     const seed = (Date.now() ^ (this.floor * 0x9e3779b1) ^ Math.floor(this.random.next() * 0xffffffff)) >>> 0;
-    this.dungeon = generateDungeon(seed);
+    this.dungeon = this.bossStage ? generateBossArena(seed) : generateDungeon(seed);
     this.player.x = this.dungeon.start.x;
     this.player.y = this.dungeon.start.y;
     this.explored = new Set<string>();
+    this.bossDefeated = !this.bossStage;
 
     this.renderMap();
     this.spawnLevelContent();
     this.renderActorsAndObjects();
     this.updateVision();
+    if (this.bossStage) this.pushLog(`第 ${this.floor} 层守层者正在大殿中等待。`);
     this.emitUiState();
   }
 
@@ -250,6 +259,25 @@ export class GameScene extends Phaser.Scene {
     );
     this.shuffle(positions);
 
+    if (this.bossStage) {
+      const stats = getBossStats(this.floor);
+      this.enemies.push({
+        id: `boss-${this.floor}`,
+        name: '深渊典狱长',
+        x: this.dungeon.exit.x,
+        y: this.dungeon.exit.y,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        attack: stats.attack,
+        defense: stats.defense,
+        reward: stats.reward,
+        frame: 122,
+        alerted: true,
+        isBoss: true,
+      });
+      return;
+    }
+
     const enemyCount = Math.min(5 + this.floor * 2, 18);
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
@@ -272,6 +300,7 @@ export class GameScene extends Phaser.Scene {
         reward: template.reward + this.floor,
         frame: template.frame,
         alerted: false,
+        isBoss: false,
       });
     }
 
@@ -292,6 +321,7 @@ export class GameScene extends Phaser.Scene {
       .sprite(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 16, 'tiny-dungeon', 36)
       .setScale(2)
       .setTint(0xb7d7c2)
+      .setVisible(this.bossDefeated)
       .setDepth(5);
     this.objectGroup.add(this.exitSprite);
 
@@ -307,7 +337,8 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       enemy.sprite = this.add
         .sprite(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, 'tiny-dungeon', enemy.frame)
-        .setScale(2)
+        .setScale(enemy.isBoss ? 3 : 2)
+        .setTint(enemy.isBoss ? 0xd46f68 : 0xffffff)
         .setDepth(7);
       this.actorGroup.add(enemy.sprite);
     }
@@ -338,15 +369,35 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (
+      target.x === this.dungeon.exit.x &&
+      target.y === this.dungeon.exit.y &&
+      this.bossStage &&
+      !this.bossDefeated
+    ) {
+      this.pushLog('通往下层的楼梯还没有出现。');
+      this.emitUiState();
+      return;
+    }
+
     this.player.x = target.x;
     this.player.y = target.y;
     this.tweenToGrid(this.playerSprite, target);
     this.playSound('step', 0.22);
 
     if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
-      this.floor += 1;
+      const previousBossStage = this.bossStage;
+      const nextStage = advanceStage(this.floor, this.bossStage);
+      this.floor = nextStage.floor;
+      this.bossStage = nextStage.bossStage;
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + 3);
-      this.pushLog(`踏入第 ${this.floor} 层，空气更加沉重。`);
+      if (this.bossStage) {
+        this.pushLog(`第 ${this.floor} 层尽头的大门缓缓开启。`);
+      } else if (previousBossStage) {
+        this.pushLog(`你离开守层大殿，进入第 ${this.floor} 层。`);
+      } else {
+        this.pushLog(`踏入第 ${this.floor} 层，空气更加沉重。`);
+      }
       this.playSound('open', 0.42);
       this.buildLevel();
       return;
@@ -368,7 +419,11 @@ export class GameScene extends Phaser.Scene {
     this.playSound('hit', 0.42);
     this.showDamage(enemy.x, enemy.y, damage, '#f6d06f');
     enemy.sprite?.setTintFill(0xf5dfc4);
-    this.time.delayedCall(70, () => enemy.sprite?.clearTint());
+    this.time.delayedCall(70, () => {
+      if (!enemy.sprite?.active) return;
+      if (enemy.isBoss) enemy.sprite.setTint(0xd46f68);
+      else enemy.sprite.clearTint();
+    });
 
     if (enemy.hp > 0) {
       this.pushLog(`你击中${enemy.name}，造成 ${damage} 点伤害。`);
@@ -382,7 +437,19 @@ export class GameScene extends Phaser.Scene {
     enemy.sprite?.destroy();
     this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
 
-    if (this.random.next() < 0.24) this.addItem(this.createLoot());
+    if (enemy.isBoss) {
+      this.bossDefeated = true;
+      this.dungeon.exit = { x: enemy.x, y: enemy.y };
+      this.exitSprite
+        .setPosition(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16)
+        .setTint(0xb7d7c2)
+        .setVisible(true);
+      const rewardType = this.random.next() < 0.5 ? 'weapon' : 'armor';
+      this.addItem(this.createItem(rewardType, 'rare'));
+      this.pushLog('守层者倒下，通往下层的楼梯出现了。');
+    } else if (this.random.next() < 0.24) {
+      this.addItem(this.createLoot());
+    }
   }
 
   private runEnemyTurns(): void {
@@ -505,10 +572,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.inventory.splice(scrollIndex, 1);
+    this.completeReturn(`你带着 ${this.gold} 枚古币回到地面。`);
+  }
+
+  private returnToTown(): void {
+    if (this.status !== 'active' || !this.bossStage || !this.bossDefeated) return;
+    this.completeReturn(`守层远征完成，你安全带回 ${this.gold} 枚古币。`);
+  }
+
+  private completeReturn(message: string): void {
     this.bankedGold += this.gold;
     localStorage.setItem('abyss-banked-gold', String(this.bankedGold));
     this.status = 'escaped';
-    this.pushLog(`你带着 ${this.gold} 枚古币回到地面。`);
+    this.pushLog(message);
     this.playSound('open', 0.5);
     this.emitUiState();
   }
@@ -521,9 +597,10 @@ export class GameScene extends Phaser.Scene {
     return this.createItem('scroll');
   }
 
-  private createItem(type: ItemType): Item {
+  private createItem(type: ItemType, forcedRarity?: Rarity): Item {
     const rarityRoll = this.random.next() + Math.min(this.floor * 0.025, 0.2);
-    const rarity: Rarity = rarityRoll > 0.88 ? 'rare' : rarityRoll > 0.58 ? 'uncommon' : 'common';
+    const rolledRarity: Rarity = rarityRoll > 0.88 ? 'rare' : rarityRoll > 0.58 ? 'uncommon' : 'common';
+    const rarity = forcedRarity ?? rolledRarity;
     const rarityPower = rarity === 'rare' ? 3 : rarity === 'uncommon' ? 1 : 0;
     const id = `item-${this.floor}-${this.itemSerial++}`;
 
@@ -557,7 +634,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updateVision(): void {
-    this.visible = computeFieldOfView(this.dungeon.tiles, this.player, FOV_RADIUS);
+    if (this.bossStage) {
+      this.visible = new Set<string>();
+      for (let y = 0; y < MAP_HEIGHT; y += 1) {
+        for (let x = 0; x < MAP_WIDTH; x += 1) this.visible.add(`${x},${y}`);
+      }
+    } else {
+      this.visible = computeFieldOfView(this.dungeon.tiles, this.player, FOV_RADIUS);
+    }
     this.visible.forEach((key) => this.explored.add(key));
     this.fogGraphics.clear().setDepth(20);
 
@@ -572,7 +656,9 @@ export class GameScene extends Phaser.Scene {
 
     for (const enemy of this.enemies) enemy.sprite?.setVisible(this.visible.has(`${enemy.x},${enemy.y}`));
     for (const chest of this.chests) chest.sprite?.setVisible(this.visible.has(`${chest.x},${chest.y}`));
-    this.exitSprite?.setVisible(this.visible.has(`${this.dungeon.exit.x},${this.dungeon.exit.y}`));
+    this.exitSprite?.setVisible(
+      this.bossDefeated && this.visible.has(`${this.dungeon.exit.x},${this.dungeon.exit.y}`),
+    );
   }
 
   private tweenToGrid(sprite: Phaser.GameObjects.Sprite, point: Point): void {
@@ -621,6 +707,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private emitUiState(): void {
+    const boss = this.enemies.find((enemy) => enemy.isBoss);
     const state: UiState = {
       status: this.status,
       floor: this.floor,
@@ -635,6 +722,9 @@ export class GameScene extends Phaser.Scene {
       inventory: this.inventory.map((item) => ({ ...item })),
       log: [...this.logEntries],
       muted: this.sound.mute,
+      isBossFloor: this.bossStage,
+      canReturnToTown: this.status === 'active' && this.bossStage && this.bossDefeated,
+      boss: boss ? { name: boss.name, hp: boss.hp, maxHp: boss.maxHp } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));
   }

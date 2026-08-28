@@ -31,6 +31,7 @@ export interface Enemy {
   reward: number;
   frame: number;
   alerted: boolean;
+  isBoss: boolean;
   sprite?: Phaser.GameObjects.Sprite;
 }
 
@@ -56,6 +57,13 @@ export interface UiState {
   inventory: Item[];
   log: string[];
   muted: boolean;
+  isBossFloor: boolean;
+  canReturnToTown: boolean;
+  boss: {
+    name: string;
+    hp: number;
+    maxHp: number;
+  } | null;
 }
 
 export type GameCommand =
@@ -63,6 +71,7 @@ export type GameCommand =
   | { action: 'move'; direction: MoveDirection }
   | { action: 'use-item'; index: number }
   | { action: 'escape' }
+  | { action: 'return-town' }
   | { action: 'mute' };
 
 export const UI_EVENT = 'abyss:ui-state';
