@@ -28,3 +28,9 @@ export function getBossStats(floor: number): BossStats {
     reward: 40 + floor * 6,
   };
 }
+
+export function getEnemyCount(floor: number): number {
+  const normalized = Math.max(1, Math.floor(floor));
+  if (normalized <= 10) return Math.min(10, 3 + Math.ceil(normalized * 0.7));
+  return Math.min(5 + normalized * 2, 18);
+}

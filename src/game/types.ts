@@ -4,6 +4,7 @@ export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
 export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll';
 export type Rarity = 'common' | 'uncommon' | 'rare';
 export type MoveDirection = 'up' | 'down' | 'left' | 'right';
+export const INVENTORY_CAPACITY = 18;
 
 export interface Item {
   id: string;
@@ -13,6 +14,8 @@ export interface Item {
   power: number;
   rarity: Rarity;
   gilded?: boolean;
+  vaultId?: string;
+  quantity?: number;
 }
 
 export interface Equipment {
@@ -20,6 +23,7 @@ export interface Equipment {
   power: number;
   rarity?: Rarity;
   gilded?: boolean;
+  vaultId?: string;
 }
 
 export interface Altar {
@@ -42,6 +46,7 @@ export interface TownLoadoutOption {
   name: string;
   type: 'weapon' | 'armor';
   power: number;
+  rarity: Rarity;
   equipped: boolean;
   starter: boolean;
 }
@@ -53,12 +58,16 @@ export interface RegionOption {
   endFloor: number;
 }
 
-export interface DiscardCandidate {
-  index: number;
+interface DiscardCandidateBase {
   name: string;
   type: ItemType;
   gilded: boolean;
+  quantity: number;
 }
+
+export type DiscardCandidate =
+  | (DiscardCandidateBase & { source: 'run'; index: number })
+  | (DiscardCandidateBase & { source: 'vault'; targetId: string });
 
 export interface Enemy {
   id: string;
@@ -98,6 +107,7 @@ export interface UiState {
   weapon: Equipment;
   armor: Equipment;
   inventory: Item[];
+  inventoryCapacity: number;
   log: string[];
   muted: boolean;
   isBossFloor: boolean;
@@ -128,6 +138,7 @@ export type GameCommand =
   | { action: 'start-region'; regionIndex: number }
   | { action: 'dismiss-region-map' }
   | { action: 'request-discard'; index: number }
+  | { action: 'request-vault-discard'; targetId: string }
   | { action: 'confirm-discard' }
   | { action: 'dismiss-discard' }
   | { action: 'mute' };

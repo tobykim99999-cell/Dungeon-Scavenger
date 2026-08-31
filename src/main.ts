@@ -43,11 +43,15 @@ const gildedStatus = getElement('gilded-status');
 const townLoadoutModal = getElement('town-loadout-modal');
 const townLoadoutOptions = getElement('town-loadout-options');
 const dismissTownLoadoutButton = getElement<HTMLButtonElement>('dismiss-town-loadout-button');
+const townEquippedSummary = getElement('town-equipped-summary');
+const townStarterActions = getElement('town-starter-actions');
+const townVaultCount = getElement('town-vault-count');
 const regionMapModal = getElement('region-map-modal');
 const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
 const discardModal = getElement('discard-modal');
 const discardItemName = getElement('discard-item-name');
+const discardKicker = getElement('discard-kicker');
 const discardWarning = getElement('discard-warning');
 const dismissDiscardButton = getElement<HTMLButtonElement>('dismiss-discard-button');
 const confirmDiscardButton = getElement<HTMLButtonElement>('confirm-discard-button');
@@ -66,25 +70,27 @@ function iconForItem(item: Item): string {
   return iconsByType[item.type];
 }
 
-function renderInventory(items: Item[]): void {
+function renderInventory(items: Item[], capacity: number): void {
   bagGrid.replaceChildren();
 
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < capacity; index += 1) {
     const item = items[index];
     const slot = document.createElement('div');
     slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}` : ''}`;
 
     if (item) {
+      const quantity = Math.max(1, item.quantity ?? 1);
       const itemButton = document.createElement('button');
       itemButton.type = 'button';
       itemButton.className = 'bag-item-button';
       itemButton.title = `${item.name}：${item.description}`;
-      itemButton.setAttribute('aria-label', `${item.name}，${item.description}`);
+      itemButton.setAttribute('aria-label', `${item.name}，${item.description}${quantity > 1 ? `，数量 ${quantity}` : ''}`);
       itemButton.innerHTML = `
         <span class="slot-index">${index + 1}</span>
         <i data-lucide="${iconForItem(item)}" aria-hidden="true"></i>
         <strong>${item.gilded ? '铭金 · ' : ''}${item.name}</strong>
         <small>${item.description}</small>
+        ${quantity > 1 ? `<b class="slot-quantity">×${quantity}</b>` : ''}
       `;
       itemButton.addEventListener('click', () => sendCommand({ action: 'use-item', index }));
 
@@ -110,12 +116,18 @@ function renderDiscard(state: UiState): void {
   discardModal.hidden = !candidate;
   if (!candidate) return;
 
-  discardItemName.textContent = candidate.name;
-  if (candidate.type === 'scroll') {
+  discardItemName.textContent = `${candidate.name}${candidate.quantity > 1 ? ` ×${candidate.quantity}` : ''}`;
+  if (candidate.source === 'vault') {
+    discardKicker.textContent = '仓库管理';
+    discardWarning.textContent = '该装备将从城镇仓库永久删除，且无法恢复。';
+  } else if (candidate.type === 'scroll') {
+    discardKicker.textContent = '行囊管理';
     discardWarning.textContent = '丢弃后将失去当前卷轴，后续普通层仍有机会再次发现。';
   } else if (candidate.gilded) {
+    discardKicker.textContent = '行囊管理';
     discardWarning.textContent = '若该装备尚未带出，对应的待带出记录也会取消。';
   } else {
+    discardKicker.textContent = '行囊管理';
     discardWarning.textContent = '该物品将从本次远征行囊中移除。';
   }
 }
@@ -172,22 +184,68 @@ function renderTownLoadout(state: UiState): void {
   const options = state.townLoadoutOptions;
   townLoadoutModal.hidden = !options;
   townLoadoutOptions.replaceChildren();
+  townEquippedSummary.replaceChildren();
+  townStarterActions.replaceChildren();
   if (!options) return;
 
-  for (const option of options) {
+  for (const equipment of [
+    { type: 'weapon' as const, label: '武器', value: state.weapon },
+    { type: 'armor' as const, label: '护甲', value: state.armor },
+  ]) {
+    const row = document.createElement('div');
+    row.className = `warehouse-equipped-row${equipment.value.gilded ? ' is-gilded' : ''}`;
+    row.innerHTML = `
+      <i data-lucide="${equipment.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
+      <span><small>${equipment.label}</small><strong>${equipment.value.name}</strong></span>
+      <b>+${equipment.value.power}</b>
+    `;
+    townEquippedSummary.append(row);
+  }
+
+  for (const option of options.filter((item) => item.starter)) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `town-loadout-option${option.equipped ? ' is-equipped' : ''}`;
-    button.innerHTML = `
+    button.className = `starter-loadout-button${option.equipped ? ' is-equipped' : ''}`;
+    button.textContent = option.type === 'weapon' ? '使用初始武器' : '使用初始护甲';
+    button.addEventListener('click', () => sendCommand({ action: 'equip-town', targetId: option.targetId }));
+    townStarterActions.append(button);
+  }
+
+  const vaultOptions = options.filter((item) => !item.starter);
+  townVaultCount.textContent = `${vaultOptions.length} 件`;
+  if (vaultOptions.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'warehouse-empty';
+    empty.innerHTML = '<i data-lucide="archive" aria-hidden="true"></i><span>仓库暂无铭金装备</span>';
+    townLoadoutOptions.append(empty);
+    return;
+  }
+
+  for (const option of vaultOptions) {
+    const item = document.createElement('div');
+    item.className = `town-vault-item rarity-${option.rarity}${option.equipped ? ' is-equipped' : ''}`;
+
+    const equipButton = document.createElement('button');
+    equipButton.type = 'button';
+    equipButton.className = 'town-vault-equip';
+    equipButton.setAttribute('aria-label', `装备${option.name}`);
+    equipButton.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span>
-        <small>${option.starter ? '初始装备' : '铭金装备'}</small>
-        <strong>${option.name}</strong>
-      </span>
+      <span><small>${option.type === 'weapon' ? '武器' : '护甲'}</small><strong>${option.name}</strong></span>
       <b>${option.equipped ? '已装备' : `+${option.power}`}</b>
     `;
-    button.addEventListener('click', () => sendCommand({ action: 'equip-town', targetId: option.targetId }));
-    townLoadoutOptions.append(button);
+    equipButton.addEventListener('click', () => sendCommand({ action: 'equip-town', targetId: option.targetId }));
+
+    const discardButton = document.createElement('button');
+    discardButton.type = 'button';
+    discardButton.className = 'town-vault-discard';
+    discardButton.title = `永久删除${option.name}`;
+    discardButton.setAttribute('aria-label', `永久删除${option.name}`);
+    discardButton.innerHTML = '<i data-lucide="trash-2" aria-hidden="true"></i>';
+    discardButton.addEventListener('click', () => sendCommand({ action: 'request-vault-discard', targetId: option.targetId }));
+
+    item.append(equipButton, discardButton);
+    townLoadoutOptions.append(item);
   }
 }
 
@@ -231,7 +289,7 @@ function renderState(state: UiState): void {
   armorValue.textContent = `${state.armor.gilded ? '铭金 · ' : ''}${state.armor.name} · +${state.armor.power}`;
   weaponValue.closest('.equipment-row')?.classList.toggle('is-gilded', Boolean(state.weapon.gilded));
   armorValue.closest('.equipment-row')?.classList.toggle('is-gilded', Boolean(state.armor.gilded));
-  bagCount.textContent = `${state.inventory.length} / 6`;
+  bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
 
   bossEncounter.hidden = !state.boss;
   if (state.boss) {
@@ -244,7 +302,7 @@ function renderState(state: UiState): void {
   renderTownLoadout(state);
   renderRegionMap(state);
   renderDiscard(state);
-  renderInventory(state.inventory);
+  renderInventory(state.inventory, state.inventoryCapacity);
   gildedStatus.hidden = state.pendingGilded.length === 0;
   gildedStatus.replaceChildren(
     ...state.pendingGilded.map((equipment) => {

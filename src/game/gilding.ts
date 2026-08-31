@@ -3,7 +3,7 @@ import type { Equipment, Item } from './types';
 export const GILDED_LOADOUT_KEY = 'abyss-gilded-loadout';
 export const GILDED_VAULT_KEY = 'abyss-gilded-vault';
 export const TOWN_LOADOUT_KEY = 'abyss-town-loadout';
-export const ESCAPE_SCROLL_RECOVERY_CHANCE = 0.2;
+export const ESCAPE_SCROLL_FLOOR_CHANCE = 0.35;
 
 export interface GildedLoadout {
   weapon?: Equipment;
@@ -18,6 +18,22 @@ export interface VaultEquipment extends Equipment {
 export interface TownLoadoutSelection {
   weaponId?: string;
   armorId?: string;
+}
+
+export interface PendingGildedEquipment extends Equipment {
+  type: 'weapon' | 'armor';
+}
+
+export interface GildedMergeResult {
+  vault: VaultEquipment[];
+  added: VaultEquipment[];
+  carried: VaultEquipment[];
+}
+
+export interface VaultDeletionResult {
+  vault: VaultEquipment[];
+  loadout: TownLoadoutSelection;
+  deleted?: VaultEquipment;
 }
 
 export function chooseAltarFloors(blockStart: number, random: () => number): number[] {
@@ -50,7 +66,7 @@ export function shouldPlaceEscapeScroll(
 ): boolean {
   if (hasScroll) return false;
   if (floor === selectedFloor) return true;
-  return floor > selectedFloor && recoveryRoll < ESCAPE_SCROLL_RECOVERY_CHANCE;
+  return recoveryRoll < ESCAPE_SCROLL_FLOOR_CHANCE;
 }
 
 export function parseGildedLoadout(value: string | null): GildedLoadout {
@@ -113,22 +129,37 @@ export function parseTownLoadout(value: string | null): TownLoadoutSelection {
 export function mergeGildedEquipment(
   vault: VaultEquipment[],
   pending: GildedLoadout,
-): { vault: VaultEquipment[]; added: VaultEquipment[] } {
+): GildedMergeResult {
+  const entries = (['weapon', 'armor'] as const).flatMap((type) => {
+    const equipment = pending[type];
+    return equipment ? [{ ...equipment, type }] : [];
+  });
+  return mergePendingGildedEquipment(vault, entries);
+}
+
+export function mergePendingGildedEquipment(
+  vault: VaultEquipment[],
+  pending: PendingGildedEquipment[],
+): GildedMergeResult {
   const next = [...vault];
   const added: VaultEquipment[] = [];
+  const carried: VaultEquipment[] = [];
 
-  for (const type of ['weapon', 'armor'] as const) {
-    const equipment = pending[type];
-    if (!equipment) continue;
+  for (const equipment of pending) {
+    const { type } = equipment;
     const id = `${type}|${equipment.name}|${equipment.power}|${equipment.rarity ?? 'common'}`;
     const existing = next.find((item) => item.id === id);
-    if (existing) continue;
+    if (existing) {
+      if (!carried.some((item) => item.id === existing.id)) carried.push(existing);
+      continue;
+    }
     const item: VaultEquipment = { ...equipment, id, type, gilded: true };
     next.push(item);
     added.push(item);
+    carried.push(item);
   }
 
-  return { vault: next, added };
+  return { vault: next, added, carried };
 }
 
 export function equipmentMatchesItem(equipment: Equipment | undefined, item: Item): boolean {
@@ -139,6 +170,28 @@ export function equipmentMatchesItem(equipment: Equipment | undefined, item: Ite
     equipment.power === item.power &&
     (equipment.rarity ?? 'common') === item.rarity,
   );
+}
+
+export function canGildEquipment(equipment: Pick<Equipment, 'gilded' | 'vaultId'>): boolean {
+  return !equipment.gilded && !equipment.vaultId;
+}
+
+export function deleteVaultEquipment(
+  vault: VaultEquipment[],
+  loadout: TownLoadoutSelection,
+  targetId: string,
+): VaultDeletionResult {
+  const deleted = vault.find((item) => item.id === targetId);
+  if (!deleted) return { vault: [...vault], loadout: { ...loadout } };
+
+  const nextLoadout = { ...loadout };
+  if (nextLoadout.weaponId === targetId) delete nextLoadout.weaponId;
+  if (nextLoadout.armorId === targetId) delete nextLoadout.armorId;
+  return {
+    vault: vault.filter((item) => item.id !== targetId),
+    loadout: nextLoadout,
+    deleted,
+  };
 }
 
 function parseEquipment(value: unknown): Equipment | undefined {

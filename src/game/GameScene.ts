@@ -13,23 +13,27 @@ import {
   type RandomSource,
 } from './dungeon';
 import { computeFieldOfView } from './fov';
+import { canStackItems, itemQuantity } from './inventory';
 import {
   chooseAltarFloors,
   chooseEscapeScrollFloor,
+  canGildEquipment,
+  deleteVaultEquipment,
   equipmentMatchesItem,
   GILDED_LOADOUT_KEY,
   GILDED_VAULT_KEY,
   mergeGildedEquipment,
+  mergePendingGildedEquipment,
   parseGildedLoadout,
   parseGildedVault,
   parseTownLoadout,
   shouldPlaceEscapeScroll,
   TOWN_LOADOUT_KEY,
-  type GildedLoadout,
+  type PendingGildedEquipment,
   type TownLoadoutSelection,
   type VaultEquipment,
 } from './gilding';
-import { advanceStage, getBossStats } from './progression';
+import { advanceStage, getBossStats, getEnemyCount } from './progression';
 import {
   getRegion,
   parseRegionProgress,
@@ -38,6 +42,7 @@ import {
 } from './regions';
 import {
   COMMAND_EVENT,
+  INVENTORY_CAPACITY,
   UI_EVENT,
   type Altar,
   type Chest,
@@ -57,7 +62,6 @@ import {
 } from './types';
 
 const TILE_SIZE = 32;
-const INVENTORY_LIMIT = 6;
 const FOV_RADIUS = 7;
 const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
 const TOWN_CHEST = { x: 8, y: 10 };
@@ -102,7 +106,7 @@ export class GameScene extends Phaser.Scene {
   private bossDefeated = true;
   private altarFloors = new Map<number, Set<number>>();
   private gildingOptions: GildingOption[] | null = null;
-  private pendingGilded: GildedLoadout = {};
+  private pendingGilded: PendingGildedEquipment[] = [];
   private vault: VaultEquipment[] = [];
   private townLoadout: TownLoadoutSelection = {};
   private townLoadoutOptions: TownLoadoutOption[] | null = null;
@@ -179,8 +183,10 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
-      if (/^Digit[1-6]$/.test(event.code)) {
+      if (/^Digit[1-9]$/.test(event.code)) {
         this.handleCommand({ action: 'use-item', index: Number(event.code.slice(-1)) - 1 });
+      } else if (event.code === 'Digit0') {
+        this.handleCommand({ action: 'use-item', index: 9 });
       } else if (event.code === 'KeyE') {
         this.handleCommand({ action: 'escape' });
       } else if (event.code === 'Escape') {
@@ -209,6 +215,16 @@ export class GameScene extends Phaser.Scene {
       this.emitUiState();
       return;
     }
+    if (command.action === 'dismiss-discard') {
+      this.discardCandidate = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'confirm-discard') {
+      this.confirmDiscard();
+      return;
+    }
+    if (this.discardCandidate) return;
     if (command.action === 'dismiss-region-map') {
       this.regionOptions = null;
       this.emitUiState();
@@ -228,6 +244,10 @@ export class GameScene extends Phaser.Scene {
       this.equipTownItem(command.targetId);
       return;
     }
+    if (command.action === 'request-vault-discard') {
+      this.requestVaultDiscard(command.targetId);
+      return;
+    }
     if (this.townLoadoutOptions) return;
 
     if (this.status === 'town') {
@@ -245,16 +265,6 @@ export class GameScene extends Phaser.Scene {
 
     if (this.status !== 'active') return;
 
-    if (command.action === 'dismiss-discard') {
-      this.discardCandidate = null;
-      this.emitUiState();
-      return;
-    }
-    if (command.action === 'confirm-discard') {
-      this.confirmDiscard();
-      return;
-    }
-    if (this.discardCandidate) return;
     if (command.action === 'request-discard') {
       if (this.gildingOptions) return;
       this.requestDiscard(command.index);
@@ -299,7 +309,7 @@ export class GameScene extends Phaser.Scene {
     this.loadTownStorage();
     this.applyTownLoadout();
     this.inventory = [];
-    this.pendingGilded = {};
+    this.pendingGilded = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
     this.regionOptions = null;
@@ -320,7 +330,7 @@ export class GameScene extends Phaser.Scene {
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.inventory = [];
-    this.pendingGilded = {};
+    this.pendingGilded = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
     this.regionOptions = null;
@@ -537,7 +547,7 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    const enemyCount = Math.min(5 + this.floor * 2, 18);
+    const enemyCount = getEnemyCount(this.floor);
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
       const templateIndex = Math.min(
@@ -816,7 +826,7 @@ export class GameScene extends Phaser.Scene {
 
   private openGildingAltar(): void {
     const options: GildingOption[] = [];
-    if (!this.weapon.gilded) {
+    if (canGildEquipment(this.weapon)) {
       options.push({
         targetId: 'equipped-weapon',
         name: this.weapon.name,
@@ -825,7 +835,7 @@ export class GameScene extends Phaser.Scene {
         source: 'equipped',
       });
     }
-    if (!this.armor.gilded) {
+    if (canGildEquipment(this.armor)) {
       options.push({
         targetId: 'equipped-armor',
         name: this.armor.name,
@@ -835,7 +845,7 @@ export class GameScene extends Phaser.Scene {
       });
     }
     for (const item of this.inventory) {
-      if ((item.type === 'weapon' || item.type === 'armor') && !item.gilded) {
+      if ((item.type === 'weapon' || item.type === 'armor') && canGildEquipment(item)) {
         options.push({
           targetId: item.id,
           name: item.name,
@@ -893,10 +903,22 @@ export class GameScene extends Phaser.Scene {
       (item) => item.id === this.townLoadout.armorId && item.type === 'armor',
     );
     this.weapon = selectedWeapon
-      ? { ...selectedWeapon, gilded: true }
+      ? {
+          name: selectedWeapon.name,
+          power: selectedWeapon.power,
+          rarity: selectedWeapon.rarity,
+          gilded: true,
+          vaultId: selectedWeapon.id,
+        }
       : { name: '缺口短剑', power: 2, rarity: 'common' };
     this.armor = selectedArmor
-      ? { ...selectedArmor, gilded: true }
+      ? {
+          name: selectedArmor.name,
+          power: selectedArmor.power,
+          rarity: selectedArmor.rarity,
+          gilded: true,
+          vaultId: selectedArmor.id,
+        }
       : { name: '旧皮甲', power: 1, rarity: 'common' };
   }
 
@@ -907,6 +929,7 @@ export class GameScene extends Phaser.Scene {
         name: '缺口短剑',
         type: 'weapon',
         power: 2,
+        rarity: 'common',
         equipped: !this.townLoadout.weaponId,
         starter: true,
       },
@@ -915,6 +938,7 @@ export class GameScene extends Phaser.Scene {
         name: '旧皮甲',
         type: 'armor',
         power: 1,
+        rarity: 'common',
         equipped: !this.townLoadout.armorId,
         starter: true,
       },
@@ -923,6 +947,7 @@ export class GameScene extends Phaser.Scene {
         name: item.name,
         type: item.type,
         power: item.power,
+        rarity: item.rarity ?? 'common',
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
@@ -959,16 +984,18 @@ export class GameScene extends Phaser.Scene {
     let gilded: Equipment | undefined;
     let type: 'weapon' | 'armor' | undefined;
     if (targetId === 'equipped-weapon') {
+      if (!canGildEquipment(this.weapon)) return;
       this.weapon = { ...this.weapon, gilded: true };
       gilded = { ...this.weapon };
       type = 'weapon';
     } else if (targetId === 'equipped-armor') {
+      if (!canGildEquipment(this.armor)) return;
       this.armor = { ...this.armor, gilded: true };
       gilded = { ...this.armor };
       type = 'armor';
     } else {
       const item = this.inventory.find((candidate) => candidate.id === targetId);
-      if (item && (item.type === 'weapon' || item.type === 'armor')) {
+      if (item && (item.type === 'weapon' || item.type === 'armor') && canGildEquipment(item)) {
         item.gilded = true;
         gilded = {
           name: item.name,
@@ -981,7 +1008,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (!gilded || !type) return;
-    this.pendingGilded[type] = gilded;
+    this.pendingGilded.push({ ...gilded, type });
     this.altar.used = true;
     if (this.altar.sprite) {
       this.tweens.killTweensOf(this.altar.sprite);
@@ -994,7 +1021,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addItem(item: Item): void {
-    if (this.inventory.length >= INVENTORY_LIMIT) {
+    if (item.type === 'potion') {
+      const existing = this.inventory.find((candidate) => canStackItems(candidate, item));
+      if (existing) {
+        existing.quantity = itemQuantity(existing) + itemQuantity(item);
+        this.pushLog(`${item.name}已叠加，当前共有 ${existing.quantity} 瓶。`);
+        return;
+      }
+    }
+
+    if (this.inventory.length >= INVENTORY_CAPACITY) {
       if (item.type === 'scroll') {
         const abandoned = this.inventory.pop();
         this.inventory.push(item);
@@ -1013,29 +1049,63 @@ export class GameScene extends Phaser.Scene {
     const item = this.inventory[index];
     if (!item) return;
     this.discardCandidate = {
+      source: 'run',
       index,
       name: item.name,
       type: item.type,
       gilded: Boolean(item.gilded),
+      quantity: itemQuantity(item),
+    };
+    this.emitUiState();
+  }
+
+  private requestVaultDiscard(targetId: string): void {
+    if (this.status !== 'town' || !this.townLoadoutOptions) return;
+    const item = this.vault.find((candidate) => candidate.id === targetId);
+    if (!item) return;
+    this.discardCandidate = {
+      source: 'vault',
+      targetId: item.id,
+      name: item.name,
+      type: item.type,
+      gilded: true,
+      quantity: 1,
     };
     this.emitUiState();
   }
 
   private confirmDiscard(): void {
     if (!this.discardCandidate) return;
-    const item = this.inventory[this.discardCandidate.index];
+    const candidate = this.discardCandidate;
+    if (candidate.source === 'vault') {
+      const result = deleteVaultEquipment(this.vault, this.townLoadout, candidate.targetId);
+      this.discardCandidate = null;
+      if (!result.deleted) {
+        this.emitUiState();
+        return;
+      }
+
+      this.vault = result.vault;
+      this.townLoadout = result.loadout;
+      this.persistTownStorage();
+      this.applyTownLoadout();
+      this.pushLog(`${result.deleted.name}已从城镇仓库永久删除。`);
+      this.openTownLoadout();
+      return;
+    }
+
+    const item = this.inventory[candidate.index];
     if (!item) {
       this.discardCandidate = null;
       this.emitUiState();
       return;
     }
 
-    this.inventory.splice(this.discardCandidate.index, 1);
-    if (item.type === 'weapon' && equipmentMatchesItem(this.pendingGilded.weapon, item)) {
-      delete this.pendingGilded.weapon;
-    }
-    if (item.type === 'armor' && equipmentMatchesItem(this.pendingGilded.armor, item)) {
-      delete this.pendingGilded.armor;
+    this.inventory.splice(candidate.index, 1);
+    if ((item.type === 'weapon' || item.type === 'armor') && item.gilded && !item.vaultId) {
+      this.pendingGilded = this.pendingGilded.filter(
+        (equipment) => equipment.type !== item.type || !equipmentMatchesItem(equipment, item),
+      );
     }
 
     this.discardCandidate = null;
@@ -1043,6 +1113,8 @@ export class GameScene extends Phaser.Scene {
       this.pushLog('逃脱卷轴已被丢弃，后续普通层仍有机会再次发现。');
     } else if (item.gilded) {
       this.pushLog(`${item.name}已被丢弃；若它尚未带出，对应铭金记录也已取消。`);
+    } else if (item.type === 'potion' && itemQuantity(item) > 1) {
+      this.pushLog(`${item.name} ×${itemQuantity(item)} 已整组丢弃。`);
     } else {
       this.pushLog(`${item.name}已从行囊中丢弃。`);
     }
@@ -1062,19 +1134,33 @@ export class GameScene extends Phaser.Scene {
     if (item.type === 'potion') {
       const before = this.player.hp;
       this.player.hp = Math.min(this.player.maxHp, this.player.hp + item.power);
-      this.inventory.splice(index, 1);
+      const quantity = itemQuantity(item);
+      if (quantity > 1) item.quantity = quantity - 1;
+      else this.inventory.splice(index, 1);
       this.pushLog(`饮下药剂，恢复 ${this.player.hp - before} 点生命。`);
       this.playSound('equip', 0.35);
     } else if (item.type === 'weapon') {
       const old = this.weapon;
-      this.weapon = { name: item.name, power: item.power, rarity: item.rarity, gilded: item.gilded };
+      this.weapon = {
+        name: item.name,
+        power: item.power,
+        rarity: item.rarity,
+        gilded: item.gilded,
+        vaultId: item.vaultId,
+      };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
       this.pushLog(`换上${item.name}，攻击提升至 ${this.totalAttack}。`);
       this.playSound('equip', 0.35);
     } else {
       const old = this.armor;
-      this.armor = { name: item.name, power: item.power, rarity: item.rarity, gilded: item.gilded };
+      this.armor = {
+        name: item.name,
+        power: item.power,
+        rarity: item.rarity,
+        gilded: item.gilded,
+        vaultId: item.vaultId,
+      };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
       this.pushLog(`穿上${item.name}，防御提升至 ${this.totalDefense}。`);
@@ -1094,17 +1180,22 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.inventory.splice(scrollIndex, 1);
-    this.saveGildedEquipment();
+    const carried = this.saveGildedEquipment();
     this.unlockRegionAtFloor(this.floor);
-    this.completeReturn(`你带着 ${this.gold} 枚古币回到地面。`);
+    const carriedMessage = carried.length > 0
+      ? `，以及铭金装备：${carried.map((item) => item.name).join('、')}`
+      : '';
+    this.completeReturn(`你带回 ${this.gold} 枚古币${carriedMessage}。`, carried.length > 0);
   }
 
-  private saveGildedEquipment(): void {
-    if (!this.pendingGilded.weapon && !this.pendingGilded.armor) return;
+  private saveGildedEquipment(): VaultEquipment[] {
+    if (this.pendingGilded.length === 0) return [];
     const stored = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
-    const merged = mergeGildedEquipment(stored, this.pendingGilded);
+    const merged = mergePendingGildedEquipment(stored, this.pendingGilded);
     this.vault = merged.vault;
     localStorage.setItem(GILDED_VAULT_KEY, JSON.stringify(this.vault));
+    const persisted = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
+    return merged.carried.filter((carried) => persisted.some((item) => item.id === carried.id));
   }
 
   private returnToTown(): void {
@@ -1113,11 +1204,12 @@ export class GameScene extends Phaser.Scene {
     this.completeReturn(`守层远征完成，你安全带回 ${this.gold} 枚古币。`);
   }
 
-  private completeReturn(message: string): void {
+  private completeReturn(message: string, showTownLoadout = false): void {
     this.bankedGold += this.gold;
     localStorage.setItem('abyss-banked-gold', String(this.bankedGold));
     this.playSound('open', 0.5);
     this.enterTown(message);
+    if (showTownLoadout) this.openTownLoadout();
   }
 
   private createLoot(): Item {
@@ -1161,6 +1253,7 @@ export class GameScene extends Phaser.Scene {
       power: equipment.power,
       rarity: equipment.rarity ?? 'common',
       gilded: equipment.gilded,
+      vaultId: equipment.vaultId,
     };
   }
 
@@ -1239,9 +1332,7 @@ export class GameScene extends Phaser.Scene {
 
   private emitUiState(): void {
     const boss = this.enemies.find((enemy) => enemy.isBoss);
-    const pendingGilded = [this.pendingGilded.weapon, this.pendingGilded.armor].filter(
-      (equipment): equipment is Equipment => Boolean(equipment),
-    );
+    const pendingGilded = this.pendingGilded.map((equipment) => ({ ...equipment }));
     const state: UiState = {
       status: this.status,
       floor: this.floor,
@@ -1256,6 +1347,7 @@ export class GameScene extends Phaser.Scene {
       weapon: { ...this.weapon },
       armor: { ...this.armor },
       inventory: this.inventory.map((item) => ({ ...item })),
+      inventoryCapacity: INVENTORY_CAPACITY,
       log: [...this.logEntries],
       muted: this.sound.mute,
       isBossFloor: this.bossStage,

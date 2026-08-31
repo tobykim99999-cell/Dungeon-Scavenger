@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { advanceStage, getBossStats, hasBossAfterFloor } from '../src/game/progression';
+import { advanceStage, getBossStats, getEnemyCount, hasBossAfterFloor } from '../src/game/progression';
+import { INVENTORY_CAPACITY } from '../src/game/types';
 
 describe('boss floor progression', () => {
   it('places a boss checkpoint after every ten normal floors', () => {
@@ -30,5 +31,24 @@ describe('boss floor progression', () => {
     expect(floorTwenty.attack).toBeGreaterThan(floorTen.attack);
     expect(floorTwenty.defense).toBeGreaterThan(floorTen.defense);
     expect(floorTwenty.reward).toBeGreaterThan(floorTen.reward);
+  });
+});
+
+describe('normal enemy counts', () => {
+  it('keeps the first region lighter', () => {
+    expect(getEnemyCount(1)).toBe(4);
+    expect(getEnemyCount(5)).toBe(7);
+    expect(getEnemyCount(10)).toBe(10);
+  });
+
+  it('returns to the existing cap after the first region', () => {
+    expect(getEnemyCount(11)).toBe(18);
+    expect(getEnemyCount(30)).toBe(18);
+  });
+});
+
+describe('inventory capacity', () => {
+  it('provides eighteen dungeon inventory slots', () => {
+    expect(INVENTORY_CAPACITY).toBe(18);
   });
 });

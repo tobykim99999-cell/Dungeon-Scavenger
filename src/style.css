@@ -434,13 +434,134 @@ button:focus-visible {
 }
 
 .town-loadout-options {
-  width: min(560px, 88%);
-  max-height: 300px;
+  min-width: 0;
+  max-height: 292px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  margin-top: 18px;
   overflow-y: auto;
+}
+
+.warehouse-layout {
+  width: min(720px, 94%);
+  min-height: 330px;
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+  text-align: left;
+}
+
+.warehouse-equipped {
+  min-width: 0;
+  padding-right: 18px;
+  border-right: 1px solid var(--line);
+}
+
+.warehouse-storage {
+  min-width: 0;
+}
+
+.warehouse-heading {
+  min-height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.warehouse-heading h3 {
+  margin: 0;
+  color: #d9ddd7;
+  font-size: 11px;
+}
+
+.warehouse-heading span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.town-equipped-summary {
+  display: grid;
+  gap: 7px;
+}
+
+.warehouse-equipped-row {
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid #3b4542;
+  border-radius: 4px;
+  background: #1b201e;
+}
+
+.warehouse-equipped-row.is-gilded {
+  border-color: #78663e;
+  background: #252218;
+}
+
+.warehouse-equipped-row > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--moss);
+}
+
+.warehouse-equipped-row.is-gilded > svg,
+.warehouse-equipped-row.is-gilded > b {
+  color: var(--gold);
+}
+
+.warehouse-equipped-row span,
+.warehouse-equipped-row small,
+.warehouse-equipped-row strong {
+  min-width: 0;
+  display: block;
+}
+
+.warehouse-equipped-row small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.warehouse-equipped-row strong {
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warehouse-equipped-row b {
+  color: var(--moss);
+  font-size: 10px;
+}
+
+.town-starter-actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.starter-loadout-button {
+  min-height: 32px;
+  border: 1px solid #394240;
+  border-radius: 4px;
+  color: #9da6a2;
+  background: #181d1b;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.starter-loadout-button:hover,
+.starter-loadout-button.is-equipped {
+  border-color: var(--moss-dark);
+  color: #dbe8c7;
+  background: #20281f;
 }
 
 .region-map-options {
@@ -594,57 +715,121 @@ button:focus-visible {
   font-size: 11px;
 }
 
-.town-loadout-option {
+.town-vault-item {
+  position: relative;
   min-width: 0;
-  min-height: 58px;
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
+  height: 68px;
   border: 1px solid #48524d;
   border-radius: 4px;
   color: var(--text);
   background: #1b201e;
+}
+
+.town-vault-item.rarity-uncommon {
+  border-color: #668267;
+}
+
+.town-vault-item.rarity-rare,
+.town-vault-item.is-equipped {
+  border-color: #9c8047;
+  background: #252218;
+}
+
+.town-vault-equip {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 25px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 31px 9px 9px;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
   text-align: left;
   cursor: pointer;
 }
 
-.town-loadout-option:hover,
-.town-loadout-option.is-equipped {
-  border-color: var(--moss);
-  background: #222b22;
+.town-vault-equip:hover {
+  background: rgba(167, 197, 109, 0.07);
 }
 
-.town-loadout-option > svg {
-  width: 19px;
-  height: 19px;
-  color: var(--moss);
+.town-vault-equip > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--gold);
 }
 
-.town-loadout-option span,
-.town-loadout-option small,
-.town-loadout-option strong {
+.town-vault-equip span,
+.town-vault-equip small,
+.town-vault-equip strong {
   min-width: 0;
   display: block;
 }
 
-.town-loadout-option small {
-  margin-bottom: 2px;
+.town-vault-equip small {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 8px;
 }
 
-.town-loadout-option strong {
+.town-vault-equip strong {
   overflow: hidden;
-  font-size: 11px;
+  margin-top: 2px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.town-loadout-option b {
-  color: var(--moss);
+.town-vault-equip b {
+  color: var(--gold);
+  font-size: 9px;
+}
+
+.town-vault-discard {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 2;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: #8d7776;
+  background: transparent;
+  cursor: pointer;
+}
+
+.town-vault-discard:hover,
+.town-vault-discard:focus-visible {
+  color: #ffd5d1;
+  background: #683532;
+}
+
+.town-vault-discard svg {
+  width: 13px;
+  height: 13px;
+}
+
+.warehouse-empty {
+  grid-column: 1 / -1;
+  min-height: 130px;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  border: 1px dashed #394240;
+  border-radius: 4px;
+  color: #697472;
   font-size: 10px;
+}
+
+.warehouse-empty svg {
+  width: 23px;
+  height: 23px;
 }
 
 .boss-heading {
@@ -887,7 +1072,7 @@ button:focus-visible {
 .bag-slot {
   position: relative;
   min-width: 0;
-  height: 62px;
+  height: 72px;
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   grid-template-rows: 1fr 1fr;
@@ -986,21 +1171,38 @@ button:focus-visible {
 
 .bag-slot strong,
 .bag-slot small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .bag-slot strong {
+  grid-column: 2;
   align-self: end;
   font-size: 10px;
   font-weight: 700;
+  line-height: 1.25;
+  word-break: normal;
 }
 
 .bag-slot small {
+  grid-column: 2;
   align-self: start;
+  margin: 2px 0 0;
+  padding: 0 20px 0 0;
   color: var(--muted);
   font-size: 9px;
+  line-height: 1.25;
+  word-break: normal;
+}
+
+.bag-item-button > svg {
+  position: static;
+  grid-row: 1 / 3;
+  align-self: center;
+  width: 19px;
+  height: 19px;
 }
 
 .slot-index {
@@ -1009,6 +1211,16 @@ button:focus-visible {
   left: 5px;
   color: #707a7c;
   font-size: 8px;
+}
+
+.slot-quantity {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  color: #f0dba7;
+  font-size: 9px;
+  line-height: 1;
+  pointer-events: none;
 }
 
 .escape-button,
@@ -1226,6 +1438,20 @@ footer {
     padding: 18px;
   }
 
+  .town-loadout-modal {
+    position: fixed;
+    inset: 8px;
+    z-index: 100;
+    align-content: start;
+    padding: 48px 18px 18px;
+    overflow-y: auto;
+  }
+
+  .town-loadout-modal .modal-close {
+    top: 10px;
+    right: 10px;
+  }
+
   .gilding-options {
     width: 100%;
     max-height: 150px;
@@ -1233,9 +1459,33 @@ footer {
   }
 
   .town-loadout-options {
-    width: 100%;
-    max-height: 180px;
+    max-height: none;
     grid-template-columns: 1fr;
+  }
+
+  .warehouse-layout {
+    width: 100%;
+    min-height: 0;
+    display: block;
+    margin-top: 12px;
+  }
+
+  .warehouse-equipped {
+    padding: 0 0 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .town-equipped-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .town-starter-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .warehouse-storage {
+    padding-top: 12px;
   }
 
   .region-map-options {

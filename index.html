@@ -74,8 +74,21 @@
               </button>
               <div class="gilding-emblem"><i data-lucide="archive" aria-hidden="true"></i></div>
               <p>灰炉镇仓库</p>
-              <h2 id="town-loadout-title">远征配装</h2>
-              <div id="town-loadout-options" class="town-loadout-options"></div>
+              <h2 id="town-loadout-title">城镇仓库</h2>
+              <div class="warehouse-layout">
+                <section class="warehouse-equipped">
+                  <div class="warehouse-heading"><h3>当前配装</h3></div>
+                  <div id="town-equipped-summary" class="town-equipped-summary"></div>
+                  <div id="town-starter-actions" class="town-starter-actions"></div>
+                </section>
+                <section class="warehouse-storage">
+                  <div class="warehouse-heading">
+                    <h3>铭金装备</h3>
+                    <span id="town-vault-count">0 件</span>
+                  </div>
+                  <div id="town-loadout-options" class="town-loadout-options"></div>
+                </section>
+              </div>
             </div>
             <div id="region-map-modal" class="region-map-modal" hidden role="dialog" aria-modal="true" aria-labelledby="region-map-title">
               <button id="dismiss-region-map-button" class="modal-close" type="button" aria-label="关闭远征地图">
@@ -88,7 +101,7 @@
             </div>
             <div id="discard-modal" class="discard-modal" hidden role="dialog" aria-modal="true" aria-labelledby="discard-title">
               <div class="discard-emblem"><i data-lucide="trash-2" aria-hidden="true"></i></div>
-              <p>行囊管理</p>
+              <p id="discard-kicker">行囊管理</p>
               <h2 id="discard-title">确认丢弃</h2>
               <strong id="discard-item-name"></strong>
               <small id="discard-warning"></small>
@@ -147,7 +160,7 @@
           <section class="panel-section bag-section">
             <div class="section-heading">
               <h2>行囊</h2>
-              <span id="bag-count">0 / 6</span>
+              <span id="bag-count">0 / 18</span>
             </div>
             <div id="bag-grid" class="bag-grid" aria-label="行囊物品"></div>
           </section>
