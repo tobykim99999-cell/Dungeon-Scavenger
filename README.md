@@ -1,2 +1,2 @@
 试玩地址：
-dungeon-scavenger.pages.dev
+https://dungeon-scavenger.pages.dev/
