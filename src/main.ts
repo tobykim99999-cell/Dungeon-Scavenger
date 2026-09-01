@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { createIcons, icons } from 'lucide';
 import './style.css';
 import { GameScene } from './game/GameScene';
+import { equipmentTierLabel, getEquipmentTier } from './game/equipment';
 import { COMMAND_EVENT, UI_EVENT, type GameCommand, type Item, type UiState } from './game/types';
 
 const getElement = <T extends HTMLElement>(id: string): T => {
@@ -19,6 +20,9 @@ const bankedValue = getElement('banked-value');
 const combatValue = getElement('combat-value');
 const weaponValue = getElement('weapon-value');
 const armorValue = getElement('armor-value');
+const weaponDetail = getElement('weapon-detail');
+const armorDetail = getElement('armor-detail');
+const setBonus = getElement('set-bonus');
 const bagCount = getElement('bag-count');
 const bagGrid = getElement('bag-grid');
 const eventLog = getElement<HTMLOListElement>('event-log');
@@ -70,13 +74,18 @@ function iconForItem(item: Item): string {
   return iconsByType[item.type];
 }
 
+function affixText(affix: { stat: 'attack' | 'defense'; value: number; label: string }): string {
+  return `${affix.label} · ${affix.stat === 'attack' ? '攻击' : '防御'} +${affix.value}`;
+}
+
 function renderInventory(items: Item[], capacity: number): void {
   bagGrid.replaceChildren();
 
   for (let index = 0; index < capacity; index += 1) {
     const item = items[index];
     const slot = document.createElement('div');
-    slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}` : ''}`;
+    const tier = item && (item.type === 'weapon' || item.type === 'armor') ? getEquipmentTier(item) : undefined;
+    slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}${tier ? ` tier-${tier}` : ''}${item.affixes?.length ? ' has-affix' : ''}` : ''}`;
 
     if (item) {
       const quantity = Math.max(1, item.quantity ?? 1);
@@ -88,8 +97,10 @@ function renderInventory(items: Item[], capacity: number): void {
       itemButton.innerHTML = `
         <span class="slot-index">${index + 1}</span>
         <i data-lucide="${iconForItem(item)}" aria-hidden="true"></i>
-        <strong>${item.gilded ? '铭金 · ' : ''}${item.name}</strong>
+        <strong>${tier ? `${equipmentTierLabel(tier)} · ` : ''}${item.name}</strong>
         <small>${item.description}</small>
+        ${item.affixes?.map((affix) => `<em class="slot-affix">${affixText(affix)}</em>`).join('') ?? ''}
+        ${item.setName ? `<em class="slot-set">套装 · ${item.setName}</em>` : ''}
         ${quantity > 1 ? `<b class="slot-quantity">×${quantity}</b>` : ''}
       `;
       itemButton.addEventListener('click', () => sendCommand({ action: 'use-item', index }));
@@ -193,12 +204,17 @@ function renderTownLoadout(state: UiState): void {
     { type: 'armor' as const, label: '护甲', value: state.armor },
   ]) {
     const row = document.createElement('div');
-    row.className = `warehouse-equipped-row${equipment.value.gilded ? ' is-gilded' : ''}`;
+    row.className = `warehouse-equipped-row tier-${getEquipmentTier(equipment.value)}${equipment.value.gilded ? ' is-gilded' : ''}`;
     row.innerHTML = `
       <i data-lucide="${equipment.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${equipment.label}</small><strong>${equipment.value.name}</strong></span>
+      <span><small>${equipmentTierLabel(getEquipmentTier(equipment.value))} · ${equipment.label}</small><strong>${equipment.value.name}</strong></span>
       <b>+${equipment.value.power}</b>
     `;
+    for (const affix of equipment.value.affixes ?? []) {
+      const detail = document.createElement('em');
+      detail.textContent = affixText(affix);
+      row.append(detail);
+    }
     townEquippedSummary.append(row);
   }
 
@@ -223,7 +239,7 @@ function renderTownLoadout(state: UiState): void {
 
   for (const option of vaultOptions) {
     const item = document.createElement('div');
-    item.className = `town-vault-item rarity-${option.rarity}${option.equipped ? ' is-equipped' : ''}`;
+    item.className = `town-vault-item rarity-${option.rarity} tier-${option.tier}${option.equipped ? ' is-equipped' : ''}${option.affixes.length ? ' has-affix' : ''}`;
 
     const equipButton = document.createElement('button');
     equipButton.type = 'button';
@@ -231,7 +247,12 @@ function renderTownLoadout(state: UiState): void {
     equipButton.setAttribute('aria-label', `装备${option.name}`);
     equipButton.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${option.type === 'weapon' ? '武器' : '护甲'}</small><strong>${option.name}</strong></span>
+      <span>
+        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</small>
+        <strong>${option.name}</strong>
+        ${option.affixes.map((affix) => `<em>${affixText(affix)}</em>`).join('')}
+        ${option.setName ? `<em>套装 · ${option.setName}</em>` : ''}
+      </span>
       <b>${option.equipped ? '已装备' : `+${option.power}`}</b>
     `;
     equipButton.addEventListener('click', () => sendCommand({ action: 'equip-town', targetId: option.targetId }));
@@ -285,10 +306,26 @@ function renderState(state: UiState): void {
   goldValue.textContent = String(state.gold);
   bankedValue.textContent = String(state.bankedGold);
   combatValue.textContent = `战力 ${state.attack + state.defense}`;
-  weaponValue.textContent = `${state.weapon.gilded ? '铭金 · ' : ''}${state.weapon.name} · +${state.weapon.power}`;
-  armorValue.textContent = `${state.armor.gilded ? '铭金 · ' : ''}${state.armor.name} · +${state.armor.power}`;
+  weaponValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.weapon))} · ${state.weapon.name} · +${state.weapon.power}`;
+  armorValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.armor))} · ${state.armor.name} · +${state.armor.power}`;
+  weaponDetail.hidden = !state.weapon.affixes?.length;
+  weaponDetail.textContent = state.weapon.affixes?.map(affixText).join('；') ?? '';
+  armorDetail.hidden = !state.armor.affixes?.length;
+  armorDetail.textContent = state.armor.affixes?.map(affixText).join('；') ?? '';
+  setBonus.hidden = !state.activeSetBonus;
+  setBonus.textContent = state.activeSetBonus
+    ? `套装激活 · ${state.activeSetBonus.setName} · ${affixText(state.activeSetBonus.affix)}`
+    : '';
   weaponValue.closest('.equipment-row')?.classList.toggle('is-gilded', Boolean(state.weapon.gilded));
   armorValue.closest('.equipment-row')?.classList.toggle('is-gilded', Boolean(state.armor.gilded));
+  for (const [element, equipment] of [
+    [weaponValue.closest('.equipment-row'), state.weapon],
+    [armorValue.closest('.equipment-row'), state.armor],
+  ] as const) {
+    if (!element) continue;
+    element.classList.remove('tier-common', 'tier-gold', 'tier-dark-gold', 'tier-purple');
+    element.classList.add(`tier-${getEquipmentTier(equipment)}`);
+  }
   bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
 
   bossEncounter.hidden = !state.boss;
@@ -307,7 +344,7 @@ function renderState(state: UiState): void {
   gildedStatus.replaceChildren(
     ...state.pendingGilded.map((equipment) => {
       const row = document.createElement('span');
-      row.textContent = `待带出 · ${equipment.name} +${equipment.power}`;
+      row.textContent = `待带出 · ${equipmentTierLabel(getEquipmentTier(equipment))} · ${equipment.name} +${equipment.power}`;
       return row;
     }),
   );

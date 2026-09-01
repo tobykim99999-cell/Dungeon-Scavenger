@@ -3,6 +3,8 @@ import type Phaser from 'phaser';
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
 export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll';
 export type Rarity = 'common' | 'uncommon' | 'rare';
+export type EquipmentTier = 'common' | 'gold' | 'dark-gold' | 'purple';
+export type BonusStat = 'attack' | 'defense';
 export type MoveDirection = 'up' | 'down' | 'left' | 'right';
 export const INVENTORY_CAPACITY = 18;
 
@@ -16,6 +18,11 @@ export interface Item {
   gilded?: boolean;
   vaultId?: string;
   quantity?: number;
+  tier?: EquipmentTier;
+  affixes?: EquipmentAffix[];
+  setId?: string;
+  setName?: string;
+  setBonus?: EquipmentAffix;
 }
 
 export interface Equipment {
@@ -24,6 +31,17 @@ export interface Equipment {
   rarity?: Rarity;
   gilded?: boolean;
   vaultId?: string;
+  tier?: EquipmentTier;
+  affixes?: EquipmentAffix[];
+  setId?: string;
+  setName?: string;
+  setBonus?: EquipmentAffix;
+}
+
+export interface EquipmentAffix {
+  stat: BonusStat;
+  value: number;
+  label: string;
 }
 
 export interface Altar {
@@ -47,6 +65,10 @@ export interface TownLoadoutOption {
   type: 'weapon' | 'armor';
   power: number;
   rarity: Rarity;
+  tier: EquipmentTier;
+  affixes: EquipmentAffix[];
+  setName?: string;
+  setBonus?: EquipmentAffix;
   equipped: boolean;
   starter: boolean;
 }
@@ -80,6 +102,8 @@ export interface Enemy {
   defense: number;
   reward: number;
   frame: number;
+  tint: number;
+  scale: number;
   alerted: boolean;
   isBoss: boolean;
   sprite?: Phaser.GameObjects.Sprite;
@@ -117,6 +141,7 @@ export interface UiState {
   townLoadoutOptions: TownLoadoutOption[] | null;
   regionOptions: RegionOption[] | null;
   discardCandidate: DiscardCandidate | null;
+  activeSetBonus: { setName: string; affix: EquipmentAffix } | null;
   boss: {
     name: string;
     hp: number;

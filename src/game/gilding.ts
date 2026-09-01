@@ -1,4 +1,5 @@
 import type { Equipment, Item } from './types';
+import { equipmentStorageId, getEquipmentTier } from './equipment';
 
 export const GILDED_LOADOUT_KEY = 'abyss-gilded-loadout';
 export const GILDED_VAULT_KEY = 'abyss-gilded-vault';
@@ -106,6 +107,11 @@ export function parseGildedVault(value: string | null): VaultEquipment[] {
         power: candidate.power,
         rarity: candidate.rarity ?? 'common',
         gilded: true,
+        tier: parseEquipmentTier(candidate.tier),
+        affixes: parseAffixes(candidate.affixes),
+        setId: candidate.setId,
+        setName: candidate.setName,
+        setBonus: parseAffix(candidate.setBonus),
       }];
     });
   } catch {
@@ -147,13 +153,23 @@ export function mergePendingGildedEquipment(
 
   for (const equipment of pending) {
     const { type } = equipment;
-    const id = `${type}|${equipment.name}|${equipment.power}|${equipment.rarity ?? 'common'}`;
+    const id = equipmentStorageId(type, equipment);
     const existing = next.find((item) => item.id === id);
     if (existing) {
       if (!carried.some((item) => item.id === existing.id)) carried.push(existing);
       continue;
     }
-    const item: VaultEquipment = { ...equipment, id, type, gilded: true };
+    const item: VaultEquipment = {
+      ...equipment,
+      id,
+      type,
+      gilded: true,
+      tier: getEquipmentTier(equipment),
+      affixes: equipment.affixes?.map((affix) => ({ ...affix })) ?? [],
+      setId: equipment.setId,
+      setName: equipment.setName,
+      setBonus: equipment.setBonus ? { ...equipment.setBonus } : undefined,
+    };
     next.push(item);
     added.push(item);
     carried.push(item);
@@ -163,17 +179,12 @@ export function mergePendingGildedEquipment(
 }
 
 export function equipmentMatchesItem(equipment: Equipment | undefined, item: Item): boolean {
-  return Boolean(
-    equipment &&
-    (item.type === 'weapon' || item.type === 'armor') &&
-    equipment.name === item.name &&
-    equipment.power === item.power &&
-    (equipment.rarity ?? 'common') === item.rarity,
-  );
+  return Boolean(equipment && (item.type === 'weapon' || item.type === 'armor')) &&
+    equipmentStorageId(item.type as 'weapon' | 'armor', equipment!) === equipmentStorageId(item.type as 'weapon' | 'armor', item);
 }
 
-export function canGildEquipment(equipment: Pick<Equipment, 'gilded' | 'vaultId'>): boolean {
-  return !equipment.gilded && !equipment.vaultId;
+export function canGildEquipment(equipment: Pick<Equipment, 'gilded' | 'vaultId' | 'tier'>): boolean {
+  return !equipment.vaultId && getEquipmentTier(equipment) === 'common';
 }
 
 export function deleteVaultEquipment(
@@ -204,5 +215,37 @@ function parseEquipment(value: unknown): Equipment | undefined {
     power: candidate.power,
     rarity: candidate.rarity ?? 'common',
     gilded: true,
+    tier: parseEquipmentTier(candidate.tier),
+    affixes: parseAffixes(candidate.affixes),
+    setId: candidate.setId,
+    setName: candidate.setName,
+    setBonus: parseAffix(candidate.setBonus),
   };
+}
+
+function parseAffixes(value: unknown): Equipment['affixes'] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const affix = parseAffix(entry);
+    return affix ? [affix] : [];
+  });
+}
+
+function parseEquipmentTier(value: unknown): NonNullable<Equipment['tier']> {
+  return value === 'common' || value === 'gold' || value === 'dark-gold' || value === 'purple'
+    ? value
+    : 'gold';
+}
+
+function parseAffix(value: unknown): Equipment['setBonus'] {
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as Partial<NonNullable<Equipment['setBonus']>>;
+  if (
+    (candidate.stat !== 'attack' && candidate.stat !== 'defense') ||
+    typeof candidate.value !== 'number' ||
+    typeof candidate.label !== 'string'
+  ) {
+    return undefined;
+  }
+  return { stat: candidate.stat, value: candidate.value, label: candidate.label };
 }

@@ -13,6 +13,16 @@ import {
   type RandomSource,
 } from './dungeon';
 import { computeFieldOfView } from './fov';
+import {
+  equipmentAffixBonus,
+  equipmentStorageId,
+  equipmentTierLabel,
+  getEquipmentTier,
+  isCarryableEquipment,
+  resolveSetBonus,
+  shouldDropDarkGoldFromChest,
+  shouldDropPurpleFromBoss,
+} from './equipment';
 import { canStackItems, itemQuantity } from './inventory';
 import {
   chooseAltarFloors,
@@ -34,6 +44,7 @@ import {
   type VaultEquipment,
 } from './gilding';
 import { advanceStage, getBossStats, getEnemyCount } from './progression';
+import { getRegionTheme } from './themes';
 import {
   getRegion,
   parseRegionProgress,
@@ -49,6 +60,8 @@ import {
   type DiscardCandidate,
   type Enemy,
   type Equipment,
+  type EquipmentAffix,
+  type EquipmentTier,
   type GameCommand,
   type GildingOption,
   type Item,
@@ -66,11 +79,15 @@ const FOV_RADIUS = 7;
 const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
 const TOWN_CHEST = { x: 8, y: 10 };
 
-const ENEMY_TEMPLATES = [
-  { name: '噬石虫', frame: 123, hp: 5, attack: 3, defense: 0, reward: 3 },
-  { name: '游荡幽魂', frame: 108, hp: 7, attack: 4, defense: 0, reward: 5 },
-  { name: '铁面守卫', frame: 122, hp: 11, attack: 5, defense: 1, reward: 8 },
-] as const;
+const PURPLE_SETS: Array<{
+  id: string;
+  name: string;
+  bonus: EquipmentAffix;
+}> = [
+  { id: 'grave-oath', name: '守墓誓约', bonus: { stat: 'attack', value: 5, label: '誓约之刃' } },
+  { id: 'deep-echo', name: '深渊回响', bonus: { stat: 'defense', value: 5, label: '回响壁垒' } },
+  { id: 'ember-crown', name: '余烬王冠', bonus: { stat: 'attack', value: 4, label: '余烬共鸣' } },
+];
 
 interface PlayerState extends Point {
   hp: number;
@@ -383,12 +400,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderMap(): void {
+    const theme = getRegionTheme(this.floor);
     for (let y = 0; y < MAP_HEIGHT; y += 1) {
       for (let x = 0; x < MAP_WIDTH; x += 1) {
         const walkable = this.dungeon.tiles[y][x] === 1;
         const floorColor = this.inTown
           ? ((x + y) % 2 === 0 ? 0x566159 : 0x4e5952)
-          : ((x + y) % 2 === 0 ? 0x3f4744 : 0x3a423f);
+          : theme.floorColors[(x + y) % 2];
         const background = this.add
           .rectangle(x * TILE_SIZE + 16, y * TILE_SIZE + 16, TILE_SIZE, TILE_SIZE, walkable ? floorColor : 0x171c20)
           .setDepth(0);
@@ -397,14 +415,23 @@ export class GameScene extends Phaser.Scene {
         if (walkable) {
           const grout = this.add
             .rectangle(x * TILE_SIZE + 16, y * TILE_SIZE + 16, TILE_SIZE - 2, TILE_SIZE - 2)
-            .setStrokeStyle(1, 0x343a38, 0.65)
+            .setStrokeStyle(1, this.inTown ? 0x465149 : theme.floorLine, 0.65)
             .setDepth(1);
           this.mapGroup.add(grout);
+          if (!this.inTown && (x * 19 + y * 13 + this.floor) % 31 === 0) {
+            const decoration = this.add
+              .sprite(x * TILE_SIZE + 16, y * TILE_SIZE + 16, 'tiny-dungeon', theme.decorationFrame)
+              .setScale(2)
+              .setTint(theme.decorationTint)
+              .setAlpha(0.28)
+              .setDepth(1);
+            this.mapGroup.add(decoration);
+          }
         } else if (this.hasAdjacentFloor(x, y)) {
           const wallTile = this.add
-            .sprite(x * TILE_SIZE + 16, y * TILE_SIZE + 16, 'tiny-dungeon', 28)
+            .sprite(x * TILE_SIZE + 16, y * TILE_SIZE + 16, 'tiny-dungeon', this.inTown ? 28 : theme.wallFrame)
             .setScale(2)
-            .setTint(this.inTown ? 0x8fa191 : 0xaebbc0)
+            .setTint(this.inTown ? 0x8fa191 : theme.wallTint)
             .setDepth(2);
           this.mapGroup.add(wallTile);
         }
@@ -521,6 +548,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnLevelContent(): void {
+    const theme = getRegionTheme(this.floor);
     const positions = collectWalkableTiles(this.dungeon).filter(
       (point) =>
         this.distance(point, this.dungeon.start) > 4 &&
@@ -532,7 +560,7 @@ export class GameScene extends Phaser.Scene {
       const stats = getBossStats(this.floor);
       this.enemies.push({
         id: `boss-${this.floor}`,
-        name: '深渊典狱长',
+        name: theme.boss.name,
         x: this.dungeon.exit.x,
         y: this.dungeon.exit.y,
         hp: stats.hp,
@@ -540,7 +568,9 @@ export class GameScene extends Phaser.Scene {
         attack: stats.attack,
         defense: stats.defense,
         reward: stats.reward,
-        frame: 122,
+        frame: theme.boss.frame,
+        tint: theme.boss.tint,
+        scale: theme.boss.scale,
         alerted: true,
         isBoss: true,
       });
@@ -550,11 +580,7 @@ export class GameScene extends Phaser.Scene {
     const enemyCount = getEnemyCount(this.floor);
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
-      const templateIndex = Math.min(
-        ENEMY_TEMPLATES.length - 1,
-        Math.floor(this.random.next() * Math.min(ENEMY_TEMPLATES.length, 1 + Math.ceil(this.floor / 2))),
-      );
-      const template = ENEMY_TEMPLATES[templateIndex];
+      const template = theme.enemies[this.random.integer(0, theme.enemies.length - 1)];
       const scale = 1 + Math.max(0, this.floor - 1) * 0.18;
       const hp = Math.round(template.hp * scale);
       this.enemies.push({
@@ -568,6 +594,8 @@ export class GameScene extends Phaser.Scene {
         defense: template.defense + Math.floor(this.floor / 4),
         reward: template.reward + this.floor,
         frame: template.frame,
+        tint: template.tint,
+        scale: template.scale,
         alerted: false,
         isBoss: false,
       });
@@ -587,7 +615,7 @@ export class GameScene extends Phaser.Scene {
         id: `chest-${this.floor}-${index}`,
         x: position.x,
         y: position.y,
-        loot: holdsEscapeScroll ? this.createItem('scroll') : this.createLoot(),
+        loot: holdsEscapeScroll ? this.createItem('scroll') : this.createChestLoot(),
       });
     }
 
@@ -609,10 +637,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private renderActorsAndObjects(): void {
+    const theme = getRegionTheme(this.floor);
     this.exitSprite = this.add
       .sprite(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 16, 'tiny-dungeon', 36)
       .setScale(2)
-      .setTint(0xb7d7c2)
+      .setTint(theme.exitTint)
       .setVisible(this.bossDefeated)
       .setDepth(5);
     this.objectGroup.add(this.exitSprite);
@@ -621,7 +650,7 @@ export class GameScene extends Phaser.Scene {
       chest.sprite = this.add
         .sprite(chest.x * TILE_SIZE + 16, chest.y * TILE_SIZE + 16, 'tiny-dungeon', 72)
         .setScale(2)
-        .setTint(0xf0c56b)
+        .setTint(theme.chestTint)
         .setDepth(6);
       this.objectGroup.add(chest.sprite);
     }
@@ -639,8 +668,8 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       enemy.sprite = this.add
         .sprite(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, 'tiny-dungeon', enemy.frame)
-        .setScale(enemy.isBoss ? 3 : 2)
-        .setTint(enemy.isBoss ? 0xd46f68 : 0xffffff)
+        .setScale(enemy.scale)
+        .setTint(enemy.tint)
         .setDepth(7);
       this.actorGroup.add(enemy.sprite);
     }
@@ -728,8 +757,7 @@ export class GameScene extends Phaser.Scene {
     enemy.sprite?.setTintFill(0xf5dfc4);
     this.time.delayedCall(70, () => {
       if (!enemy.sprite?.active) return;
-      if (enemy.isBoss) enemy.sprite.setTint(0xd46f68);
-      else enemy.sprite.clearTint();
+      enemy.sprite.setTint(enemy.tint);
     });
 
     if (enemy.hp > 0) {
@@ -749,10 +777,13 @@ export class GameScene extends Phaser.Scene {
       this.dungeon.exit = { x: enemy.x, y: enemy.y };
       this.exitSprite
         .setPosition(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16)
-        .setTint(0xb7d7c2)
+        .setTint(getRegionTheme(this.floor).exitTint)
         .setVisible(true);
       const rewardType = this.random.next() < 0.5 ? 'weapon' : 'armor';
-      this.addItem(this.createItem(rewardType, 'rare'));
+      const rewardTier: EquipmentTier = shouldDropPurpleFromBoss(this.floor) ? 'purple' : 'common';
+      const reward = this.createItem(rewardType, 'rare', rewardTier);
+      this.addItem(reward);
+      this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
       this.pushLog('守层者倒下，通往下层的楼梯出现了。');
     } else if (this.random.next() < 0.24) {
       this.addItem(this.createLoot());
@@ -820,7 +851,10 @@ export class GameScene extends Phaser.Scene {
     chest.sprite?.destroy();
     this.chests = this.chests.filter((candidate) => candidate.id !== chest.id);
     this.playSound('open', 0.38);
-    this.pushLog(`打开旧木箱：${chest.loot.name}。`);
+    const tier = chest.loot.type === 'weapon' || chest.loot.type === 'armor'
+      ? `${equipmentTierLabel(getEquipmentTier(chest.loot))} `
+      : '';
+    this.pushLog(`打开旧木箱：${tier}${chest.loot.name}。`);
     this.addItem(chest.loot);
   }
 
@@ -909,8 +943,13 @@ export class GameScene extends Phaser.Scene {
           rarity: selectedWeapon.rarity,
           gilded: true,
           vaultId: selectedWeapon.id,
+          tier: getEquipmentTier(selectedWeapon),
+          affixes: selectedWeapon.affixes?.map((affix) => ({ ...affix })),
+          setId: selectedWeapon.setId,
+          setName: selectedWeapon.setName,
+          setBonus: selectedWeapon.setBonus ? { ...selectedWeapon.setBonus } : undefined,
         }
-      : { name: '缺口短剑', power: 2, rarity: 'common' };
+      : { name: '缺口短剑', power: 2, rarity: 'common', tier: 'common' };
     this.armor = selectedArmor
       ? {
           name: selectedArmor.name,
@@ -918,8 +957,13 @@ export class GameScene extends Phaser.Scene {
           rarity: selectedArmor.rarity,
           gilded: true,
           vaultId: selectedArmor.id,
+          tier: getEquipmentTier(selectedArmor),
+          affixes: selectedArmor.affixes?.map((affix) => ({ ...affix })),
+          setId: selectedArmor.setId,
+          setName: selectedArmor.setName,
+          setBonus: selectedArmor.setBonus ? { ...selectedArmor.setBonus } : undefined,
         }
-      : { name: '旧皮甲', power: 1, rarity: 'common' };
+      : { name: '旧皮甲', power: 1, rarity: 'common', tier: 'common' };
   }
 
   private openTownLoadout(): void {
@@ -930,6 +974,8 @@ export class GameScene extends Phaser.Scene {
         type: 'weapon',
         power: 2,
         rarity: 'common',
+        tier: 'common',
+        affixes: [],
         equipped: !this.townLoadout.weaponId,
         starter: true,
       },
@@ -939,6 +985,8 @@ export class GameScene extends Phaser.Scene {
         type: 'armor',
         power: 1,
         rarity: 'common',
+        tier: 'common',
+        affixes: [],
         equipped: !this.townLoadout.armorId,
         starter: true,
       },
@@ -948,6 +996,10 @@ export class GameScene extends Phaser.Scene {
         type: item.type,
         power: item.power,
         rarity: item.rarity ?? 'common',
+        tier: getEquipmentTier(item),
+        affixes: item.affixes?.map((affix) => ({ ...affix })) ?? [],
+        setName: item.setName,
+        setBonus: item.setBonus ? { ...item.setBonus } : undefined,
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
@@ -985,23 +1037,29 @@ export class GameScene extends Phaser.Scene {
     let type: 'weapon' | 'armor' | undefined;
     if (targetId === 'equipped-weapon') {
       if (!canGildEquipment(this.weapon)) return;
-      this.weapon = { ...this.weapon, gilded: true };
+      this.weapon = { ...this.weapon, gilded: true, tier: 'gold' };
       gilded = { ...this.weapon };
       type = 'weapon';
     } else if (targetId === 'equipped-armor') {
       if (!canGildEquipment(this.armor)) return;
-      this.armor = { ...this.armor, gilded: true };
+      this.armor = { ...this.armor, gilded: true, tier: 'gold' };
       gilded = { ...this.armor };
       type = 'armor';
     } else {
       const item = this.inventory.find((candidate) => candidate.id === targetId);
       if (item && (item.type === 'weapon' || item.type === 'armor') && canGildEquipment(item)) {
         item.gilded = true;
+        item.tier = 'gold';
         gilded = {
           name: item.name,
           power: item.power,
           rarity: item.rarity,
           gilded: true,
+          tier: 'gold',
+          affixes: item.affixes,
+          setId: item.setId,
+          setName: item.setName,
+          setBonus: item.setBonus,
         };
         type = item.type;
       }
@@ -1037,12 +1095,50 @@ export class GameScene extends Phaser.Scene {
         this.pushLog(`为唯一的逃脱卷轴腾出位置，遗下了${abandoned?.name ?? '一件物品'}。`);
         return;
       }
+      if ((item.type === 'weapon' || item.type === 'armor') && isCarryableEquipment(item)) {
+        let replaceIndex = -1;
+        for (let index = this.inventory.length - 1; index >= 0; index -= 1) {
+          const candidate = this.inventory[index];
+          if (
+            candidate.type !== 'scroll' &&
+            !((candidate.type === 'weapon' || candidate.type === 'armor') && isCarryableEquipment(candidate))
+          ) {
+            replaceIndex = index;
+            break;
+          }
+        }
+        const index = replaceIndex >= 0 ? replaceIndex : this.inventory.length - 1;
+        const [abandoned] = this.inventory.splice(index, 1, item);
+        this.removePendingEquipment(abandoned);
+        this.queueCarryableEquipment(item);
+        this.pushLog(`为${equipmentTierLabel(getEquipmentTier(item))}腾出位置，遗下了${abandoned.name}。`);
+        return;
+      }
       const salvage = Math.max(2, item.power);
       this.gold += salvage;
       this.pushLog(`行囊已满，将${item.name}拆换成 ${salvage} 枚古币。`);
       return;
     }
     this.inventory.push(item);
+    this.queueCarryableEquipment(item);
+  }
+
+  private queueCarryableEquipment(item: Item): void {
+    if ((item.type !== 'weapon' && item.type !== 'armor') || !isCarryableEquipment(item)) return;
+    const id = equipmentStorageId(item.type, item);
+    if (this.pendingGilded.some((equipment) => equipmentStorageId(equipment.type, equipment) === id)) return;
+    this.pendingGilded.push({
+      type: item.type,
+      name: item.name,
+      power: item.power,
+      rarity: item.rarity,
+      gilded: true,
+      tier: getEquipmentTier(item),
+      affixes: item.affixes?.map((affix) => ({ ...affix })),
+      setId: item.setId,
+      setName: item.setName,
+      setBonus: item.setBonus ? { ...item.setBonus } : undefined,
+    });
   }
 
   private requestDiscard(index: number): void {
@@ -1057,6 +1153,13 @@ export class GameScene extends Phaser.Scene {
       quantity: itemQuantity(item),
     };
     this.emitUiState();
+  }
+
+  private removePendingEquipment(item: Item): void {
+    if ((item.type !== 'weapon' && item.type !== 'armor') || !item.gilded || item.vaultId) return;
+    this.pendingGilded = this.pendingGilded.filter(
+      (equipment) => equipment.type !== item.type || !equipmentMatchesItem(equipment, item),
+    );
   }
 
   private requestVaultDiscard(targetId: string): void {
@@ -1102,11 +1205,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.inventory.splice(candidate.index, 1);
-    if ((item.type === 'weapon' || item.type === 'armor') && item.gilded && !item.vaultId) {
-      this.pendingGilded = this.pendingGilded.filter(
-        (equipment) => equipment.type !== item.type || !equipmentMatchesItem(equipment, item),
-      );
-    }
+    this.removePendingEquipment(item);
 
     this.discardCandidate = null;
     if (item.type === 'scroll') {
@@ -1147,6 +1246,11 @@ export class GameScene extends Phaser.Scene {
         rarity: item.rarity,
         gilded: item.gilded,
         vaultId: item.vaultId,
+        tier: item.tier,
+        affixes: item.affixes?.map((affix) => ({ ...affix })),
+        setId: item.setId,
+        setName: item.setName,
+        setBonus: item.setBonus ? { ...item.setBonus } : undefined,
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
@@ -1160,6 +1264,11 @@ export class GameScene extends Phaser.Scene {
         rarity: item.rarity,
         gilded: item.gilded,
         vaultId: item.vaultId,
+        tier: item.tier,
+        affixes: item.affixes?.map((affix) => ({ ...affix })),
+        setId: item.setId,
+        setName: item.setName,
+        setBonus: item.setBonus ? { ...item.setBonus } : undefined,
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
@@ -1219,7 +1328,19 @@ export class GameScene extends Phaser.Scene {
     return this.createItem('armor');
   }
 
-  private createItem(type: ItemType, forcedRarity?: Rarity): Item {
+  private createChestLoot(): Item {
+    if (shouldDropDarkGoldFromChest(this.random.next())) {
+      const type = this.random.next() < 0.5 ? 'weapon' : 'armor';
+      return this.createItem(type, 'rare', 'dark-gold');
+    }
+    return this.createLoot();
+  }
+
+  private createItem(
+    type: ItemType,
+    forcedRarity?: Rarity,
+    tier: EquipmentTier = 'common',
+  ): Item {
     const rarityRoll = this.random.next() + Math.min(this.floor * 0.025, 0.2);
     const rolledRarity: Rarity = rarityRoll > 0.88 ? 'rare' : rarityRoll > 0.58 ? 'uncommon' : 'common';
     const rarity = forcedRarity ?? rolledRarity;
@@ -1235,13 +1356,66 @@ export class GameScene extends Phaser.Scene {
     }
 
     const power = 2 + Math.ceil(this.floor * 0.8) + rarityPower;
-    if (type === 'weapon') {
-      const names = rarity === 'rare' ? ['熔火长剑', '守墓人钉锤'] : ['锈蚀手斧', '矿工短镐', '裂纹弯刀'];
-      return { id, type, name: names[this.random.integer(0, names.length - 1)], description: `攻击 +${power}`, power, rarity };
+    const affixes = tier === 'dark-gold' || tier === 'purple' ? [this.createEquipmentAffix()] : [];
+    if (tier === 'purple') {
+      const set = PURPLE_SETS[this.random.integer(0, PURPLE_SETS.length - 1)];
+      return {
+        id,
+        type,
+        name: set.name,
+        description: `${type === 'weapon' ? '攻击' : '防御'} +${power}`,
+        power,
+        rarity,
+        gilded: true,
+        tier,
+        affixes,
+        setId: set.id,
+        setName: set.name,
+        setBonus: { ...set.bonus },
+      };
     }
 
-    const names = rarity === 'rare' ? ['深岩板甲', '缄默守卫甲'] : ['补丁锁甲', '硬皮胸甲', '旧卫兵甲'];
-    return { id, type, name: names[this.random.integer(0, names.length - 1)], description: `防御 +${power}`, power, rarity };
+    if (type === 'weapon') {
+      const names = tier === 'dark-gold'
+        ? ['黯星战刃', '黑曜处刑斧', '暮光钉锤']
+        : (rarity === 'rare' ? ['熔火长剑', '守墓人钉锤'] : ['锈蚀手斧', '矿工短镐', '裂纹弯刀']);
+      return {
+        id,
+        type,
+        name: names[this.random.integer(0, names.length - 1)],
+        description: `攻击 +${power}`,
+        power,
+        rarity,
+        gilded: tier !== 'common',
+        tier,
+        affixes,
+      };
+    }
+
+    const names = tier === 'dark-gold'
+      ? ['黯金壁垒', '黑曜守卫甲', '暮光重铠']
+      : (rarity === 'rare' ? ['深岩板甲', '缄默守卫甲'] : ['补丁锁甲', '硬皮胸甲', '旧卫兵甲']);
+    return {
+      id,
+      type,
+      name: names[this.random.integer(0, names.length - 1)],
+      description: `防御 +${power}`,
+      power,
+      rarity,
+      gilded: tier !== 'common',
+      tier,
+      affixes,
+    };
+  }
+
+  private createEquipmentAffix(): EquipmentAffix {
+    const stat = this.random.next() < 0.5 ? 'attack' : 'defense';
+    const value = Math.max(1, Math.ceil(this.floor / 10) + this.random.integer(0, 1));
+    return {
+      stat,
+      value,
+      label: stat === 'attack' ? '锋锐' : '坚韧',
+    };
   }
 
   private equipmentAsItem(type: 'weapon' | 'armor', equipment: Equipment): Item {
@@ -1254,10 +1428,16 @@ export class GameScene extends Phaser.Scene {
       rarity: equipment.rarity ?? 'common',
       gilded: equipment.gilded,
       vaultId: equipment.vaultId,
+      tier: getEquipmentTier(equipment),
+      affixes: equipment.affixes?.map((affix) => ({ ...affix })),
+      setId: equipment.setId,
+      setName: equipment.setName,
+      setBonus: equipment.setBonus ? { ...equipment.setBonus } : undefined,
     };
   }
 
   private updateVision(): void {
+    const theme = getRegionTheme(this.floor);
     if (this.bossStage || this.inTown) {
       this.visible = new Set<string>();
       for (let y = 0; y < MAP_HEIGHT; y += 1) {
@@ -1273,8 +1453,8 @@ export class GameScene extends Phaser.Scene {
       for (let x = 0; x < MAP_WIDTH; x += 1) {
         const key = `${x},${y}`;
         if (this.visible.has(key)) continue;
-        const alpha = this.explored.has(key) ? 0.68 : 0.96;
-        this.fogGraphics.fillStyle(0x080a0b, alpha).fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+        const alpha = this.explored.has(key) ? theme.exploredFogAlpha : 0.96;
+        this.fogGraphics.fillStyle(theme.fogColor, alpha).fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
       }
     }
 
@@ -1332,6 +1512,7 @@ export class GameScene extends Phaser.Scene {
 
   private emitUiState(): void {
     const boss = this.enemies.find((enemy) => enemy.isBoss);
+    const activeSetBonus = resolveSetBonus(this.weapon, this.armor);
     const pendingGilded = this.pendingGilded.map((equipment) => ({ ...equipment }));
     const state: UiState = {
       status: this.status,
@@ -1357,16 +1538,27 @@ export class GameScene extends Phaser.Scene {
       townLoadoutOptions: this.townLoadoutOptions?.map((option) => ({ ...option })) ?? null,
       regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
       discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
+      activeSetBonus,
       boss: boss ? { name: boss.name, hp: boss.hp, maxHp: boss.maxHp } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));
   }
 
   private get totalAttack(): number {
-    return this.player.baseAttack + this.weapon.power;
+    const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
+    return this.player.baseAttack +
+      this.weapon.power +
+      equipmentAffixBonus(this.weapon, 'attack') +
+      equipmentAffixBonus(this.armor, 'attack') +
+      (setBonus?.stat === 'attack' ? setBonus.value : 0);
   }
 
   private get totalDefense(): number {
-    return this.player.baseDefense + this.armor.power;
+    const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
+    return this.player.baseDefense +
+      this.armor.power +
+      equipmentAffixBonus(this.weapon, 'defense') +
+      equipmentAffixBonus(this.armor, 'defense') +
+      (setBonus?.stat === 'defense' ? setBonus.value : 0);
   }
 }

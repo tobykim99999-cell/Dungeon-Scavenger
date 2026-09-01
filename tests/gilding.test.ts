@@ -38,7 +38,17 @@ describe('gilding altar frequency', () => {
 describe('gilded equipment storage', () => {
   it('restores valid equipment as gilded', () => {
     expect(parseGildedLoadout('{"weapon":{"name":"熔火长剑","power":14,"rarity":"rare"}}')).toEqual({
-      weapon: { name: '熔火长剑', power: 14, rarity: 'rare', gilded: true },
+      weapon: {
+        name: '熔火长剑',
+        power: 14,
+        rarity: 'rare',
+        gilded: true,
+        tier: 'gold',
+        affixes: [],
+        setId: undefined,
+        setName: undefined,
+        setBonus: undefined,
+      },
       armor: undefined,
     });
   });
