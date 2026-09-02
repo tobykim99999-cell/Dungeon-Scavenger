@@ -39,3 +39,26 @@ describe('inventory potion stacks', () => {
     expect(itemQuantity(potion({ quantity: 0 }))).toBe(1);
   });
 });
+
+describe('inventory material stacks', () => {
+  const material = (overrides: Partial<Item> = {}): Item => ({
+    id: 'material-1',
+    type: 'material',
+    name: '灰岩结晶',
+    description: '灰岩矿脉材料',
+    power: 0,
+    rarity: 'common',
+    materialRegion: 0,
+    quantity: 2,
+    ...overrides,
+  });
+
+  it('stacks matching materials from the same region', () => {
+    expect(canStackItems(material(), material({ id: 'material-2', quantity: 3 }))).toBe(true);
+  });
+
+  it('keeps different regions and gilding states separate', () => {
+    expect(canStackItems(material(), material({ materialRegion: 1, name: '潮蚀珍珠' }))).toBe(false);
+    expect(canStackItems(material(), material({ gilded: true }))).toBe(false);
+  });
+});

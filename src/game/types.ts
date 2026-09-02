@@ -1,10 +1,10 @@
 import type Phaser from 'phaser';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
-export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll';
+export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll' | 'material';
 export type Rarity = 'common' | 'uncommon' | 'rare';
 export type EquipmentTier = 'common' | 'gold' | 'dark-gold' | 'purple';
-export type BonusStat = 'attack' | 'defense';
+export type BonusStat = 'attack' | 'defense' | 'maxHp' | 'crit' | 'bleed';
 export type MoveDirection = 'up' | 'down' | 'left' | 'right';
 export const INVENTORY_CAPACITY = 18;
 
@@ -23,6 +23,7 @@ export interface Item {
   setId?: string;
   setName?: string;
   setBonus?: EquipmentAffix;
+  materialRegion?: number;
 }
 
 export interface Equipment {
@@ -54,9 +55,10 @@ export interface Altar {
 export interface GildingOption {
   targetId: string;
   name: string;
-  type: 'weapon' | 'armor';
+  type: 'weapon' | 'armor' | 'material';
   power: number;
   source: 'equipped' | 'inventory';
+  quantity?: number;
 }
 
 export interface TownLoadoutOption {
@@ -78,6 +80,27 @@ export interface RegionOption {
   name: string;
   startFloor: number;
   endFloor: number;
+}
+
+export interface TownMaterialBalance {
+  regionIndex: number;
+  name: string;
+  quantity: number;
+}
+
+export interface MerchantOffer extends TownMaterialBalance {
+  regionName: string;
+  cost: number;
+  canBuy: boolean;
+}
+
+export interface MerchantReveal {
+  sequence: number;
+  regionName: string;
+  name: string;
+  type: 'weapon' | 'armor';
+  power: number;
+  tier: EquipmentTier;
 }
 
 interface DiscardCandidateBase {
@@ -106,6 +129,8 @@ export interface Enemy {
   scale: number;
   alerted: boolean;
   isBoss: boolean;
+  bleedDamage?: number;
+  bleedTurns?: number;
   sprite?: Phaser.GameObjects.Sprite;
 }
 
@@ -113,8 +138,9 @@ export interface Chest {
   id: string;
   x: number;
   y: number;
-  loot: Item;
+  loot?: Item;
   sprite?: Phaser.GameObjects.Sprite;
+  effect?: Phaser.GameObjects.Container;
 }
 
 export interface UiState {
@@ -142,6 +168,10 @@ export interface UiState {
   regionOptions: RegionOption[] | null;
   discardCandidate: DiscardCandidate | null;
   activeSetBonus: { setName: string; affix: EquipmentAffix } | null;
+  pendingMaterials: TownMaterialBalance[];
+  townMaterials: TownMaterialBalance[];
+  merchantOffers: MerchantOffer[] | null;
+  merchantReveal: MerchantReveal | null;
   boss: {
     name: string;
     hp: number;
@@ -166,6 +196,9 @@ export type GameCommand =
   | { action: 'request-vault-discard'; targetId: string }
   | { action: 'confirm-discard' }
   | { action: 'dismiss-discard' }
+  | { action: 'buy-region-jar'; regionIndex: number }
+  | { action: 'dismiss-merchant-reveal' }
+  | { action: 'dismiss-merchant' }
   | { action: 'mute' };
 
 export const UI_EVENT = 'abyss:ui-state';

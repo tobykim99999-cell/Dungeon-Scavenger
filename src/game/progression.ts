@@ -34,3 +34,9 @@ export function getEnemyCount(floor: number): number {
   if (normalized <= 10) return Math.min(10, 3 + Math.ceil(normalized * 0.7));
   return Math.min(5 + normalized * 2, 18);
 }
+
+export function getChestCount(floor: number): number {
+  const normalized = Math.max(1, Math.floor(floor));
+  const floorInRegion = ((normalized - 1) % 10) + 1;
+  return floorInRegion <= 5 ? 2 : 3;
+}

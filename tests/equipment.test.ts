@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BOSS_PURPLE_DROP_CHANCE,
   equipmentAffixBonus,
   equipmentStorageId,
   getEquipmentTier,
   isCarryableEquipment,
+  isDarkGoldEquipment,
+  rollBossRewardTiers,
   resolveSetBonus,
+  shouldCriticalHit,
   shouldDropDarkGoldFromChest,
   shouldDropPurpleFromBoss,
 } from '../src/game/equipment';
@@ -27,11 +31,26 @@ describe('equipment tiers', () => {
     expect(shouldDropDarkGoldFromChest(0.1)).toBe(false);
   });
 
-  it('makes checkpoint bosses purple starting after the third map', () => {
-    expect(shouldDropPurpleFromBoss(20)).toBe(false);
-    expect(shouldDropPurpleFromBoss(30)).toBe(true);
-    expect(shouldDropPurpleFromBoss(40)).toBe(true);
-    expect(shouldDropPurpleFromBoss(31)).toBe(false);
+  it('uses an exact sixty percent purple event starting with the second map boss', () => {
+    expect(BOSS_PURPLE_DROP_CHANCE).toBe(0.6);
+    expect(shouldDropPurpleFromBoss(10, 0)).toBe(false);
+    expect(shouldDropPurpleFromBoss(20, 0.5999)).toBe(true);
+    expect(shouldDropPurpleFromBoss(20, 0.6)).toBe(false);
+    expect(shouldDropPurpleFromBoss(40, 0)).toBe(true);
+    expect(shouldDropPurpleFromBoss(21, 0)).toBe(false);
+  });
+
+  it('always returns two gold-or-better boss rewards and upgrades only one on success', () => {
+    expect(rollBossRewardTiers(10, 0, 0)).toEqual(['gold', 'gold']);
+    expect(rollBossRewardTiers(20, 0.2, 0.2)).toEqual(['purple', 'gold']);
+    expect(rollBossRewardTiers(20, 0.2, 0.8)).toEqual(['gold', 'purple']);
+    expect(rollBossRewardTiers(20, 0.8, 0.2)).toEqual(['gold', 'gold']);
+  });
+
+  it('identifies only dark-gold equipment for chest beam effects', () => {
+    expect(isDarkGoldEquipment({ tier: 'dark-gold' })).toBe(true);
+    expect(isDarkGoldEquipment({ tier: 'gold' })).toBe(false);
+    expect(isDarkGoldEquipment({ tier: 'purple' })).toBe(false);
   });
 });
 
@@ -51,6 +70,14 @@ describe('equipment affixes and sets', () => {
     const weapon = purple('weapon', 'grave-oath');
     expect(equipmentAffixBonus(weapon, 'attack')).toBe(3);
     expect(equipmentAffixBonus(weapon, 'defense')).toBe(0);
+    expect(equipmentAffixBonus({ affixes: [{ stat: 'maxHp', value: 9, label: '不朽' }] }, 'maxHp')).toBe(9);
+  });
+
+  it('uses exact percentage boundaries for critical hits', () => {
+    expect(shouldCriticalHit(20, 0.1999)).toBe(true);
+    expect(shouldCriticalHit(20, 0.2)).toBe(false);
+    expect(shouldCriticalHit(0, 0)).toBe(false);
+    expect(shouldCriticalHit(100, 0.9999)).toBe(true);
   });
 
   it('activates a set only for matching purple weapon and armor names', () => {

@@ -240,12 +240,13 @@ function parseEquipmentTier(value: unknown): NonNullable<Equipment['tier']> {
 function parseAffix(value: unknown): Equipment['setBonus'] {
   if (!value || typeof value !== 'object') return undefined;
   const candidate = value as Partial<NonNullable<Equipment['setBonus']>>;
+  const validStats = ['attack', 'defense', 'maxHp', 'crit', 'bleed'];
   if (
-    (candidate.stat !== 'attack' && candidate.stat !== 'defense') ||
+    !validStats.includes(candidate.stat ?? '') ||
     typeof candidate.value !== 'number' ||
     typeof candidate.label !== 'string'
   ) {
     return undefined;
   }
-  return { stat: candidate.stat, value: candidate.value, label: candidate.label };
+  return { stat: candidate.stat!, value: candidate.value, label: candidate.label };
 }

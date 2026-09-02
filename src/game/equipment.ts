@@ -6,6 +6,7 @@ import type {
 } from './types';
 
 export const DARK_GOLD_CHEST_CHANCE = 0.1;
+export const BOSS_PURPLE_DROP_CHANCE = 0.6;
 
 export function getEquipmentTier(equipment: Pick<Equipment, 'tier' | 'gilded'>): EquipmentTier {
   if (equipment.tier) return equipment.tier;
@@ -33,6 +34,11 @@ export function equipmentAffixBonus(
   return equipment?.affixes
     ?.filter((affix) => affix.stat === stat)
     .reduce((total, affix) => total + affix.value, 0) ?? 0;
+}
+
+export function shouldCriticalHit(chancePercent: number, roll: number): boolean {
+  const chance = Math.min(100, Math.max(0, chancePercent)) / 100;
+  return roll < chance;
 }
 
 export function resolveSetBonus(
@@ -73,6 +79,22 @@ export function shouldDropDarkGoldFromChest(roll: number): boolean {
   return roll < DARK_GOLD_CHEST_CHANCE;
 }
 
-export function shouldDropPurpleFromBoss(floor: number): boolean {
-  return floor >= 30 && floor % 10 === 0;
+export function shouldDropPurpleFromBoss(floor: number, roll: number): boolean {
+  return floor >= 20 && floor % 10 === 0 && roll < BOSS_PURPLE_DROP_CHANCE;
+}
+
+export function rollBossRewardTiers(
+  floor: number,
+  purpleRoll: number,
+  purpleSlotRoll: number,
+): readonly [EquipmentTier, EquipmentTier] {
+  const tiers: [EquipmentTier, EquipmentTier] = ['gold', 'gold'];
+  if (shouldDropPurpleFromBoss(floor, purpleRoll)) {
+    tiers[purpleSlotRoll < 0.5 ? 0 : 1] = 'purple';
+  }
+  return tiers;
+}
+
+export function isDarkGoldEquipment(equipment: Pick<Equipment, 'tier' | 'gilded'>): boolean {
+  return getEquipmentTier(equipment) === 'dark-gold';
 }

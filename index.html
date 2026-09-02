@@ -99,6 +99,37 @@
               <h2 id="region-map-title">远征地图</h2>
               <div id="region-map-options" class="region-map-options"></div>
             </div>
+            <div id="merchant-modal" class="merchant-modal" hidden role="dialog" aria-modal="true" aria-labelledby="merchant-title">
+              <button id="dismiss-merchant-button" class="modal-close" type="button" aria-label="关闭罐商">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem merchant-emblem"><i data-lucide="package-open" aria-hidden="true"></i></div>
+              <p>灰炉镇罐商</p>
+              <h2 id="merchant-title">地区罐子</h2>
+              <div class="jar-probabilities">
+                <span>第一地区：金装 80% · 暗金 20%</span>
+                <span>第二地区起：金装 75% · 暗金 20% · 紫装 5%</span>
+              </div>
+              <div id="merchant-offers" class="merchant-offers"></div>
+              <div id="merchant-reveal" class="merchant-reveal" hidden aria-live="polite">
+                <div class="jar-reveal-stage">
+                  <div class="jar-reveal-light" aria-hidden="true"></div>
+                  <div class="jar-reveal-particles" aria-hidden="true">
+                    <span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span>
+                  </div>
+                  <div class="jar-reveal-vessel" aria-hidden="true">
+                    <i data-lucide="package-open"></i>
+                  </div>
+                  <div class="jar-reveal-copy">
+                    <small id="merchant-reveal-kicker"></small>
+                    <div id="merchant-reveal-item-icon" class="jar-reveal-item-icon"></div>
+                    <strong id="merchant-reveal-name"></strong>
+                    <span id="merchant-reveal-power"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
             <div id="discard-modal" class="discard-modal" hidden role="dialog" aria-modal="true" aria-labelledby="discard-title">
               <div class="discard-emblem"><i data-lucide="trash-2" aria-hidden="true"></i></div>
               <p id="discard-kicker">行囊管理</p>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceStage, getBossStats, getEnemyCount, hasBossAfterFloor } from '../src/game/progression';
+import { advanceStage, getBossStats, getChestCount, getEnemyCount, hasBossAfterFloor } from '../src/game/progression';
 import { INVENTORY_CAPACITY } from '../src/game/types';
 
 describe('boss floor progression', () => {
@@ -50,5 +50,16 @@ describe('normal enemy counts', () => {
 describe('inventory capacity', () => {
   it('provides eighteen dungeon inventory slots', () => {
     expect(INVENTORY_CAPACITY).toBe(18);
+  });
+});
+
+describe('normal chest counts', () => {
+  it('uses two chests early and three chests late in every region', () => {
+    expect(getChestCount(1)).toBe(2);
+    expect(getChestCount(5)).toBe(2);
+    expect(getChestCount(6)).toBe(3);
+    expect(getChestCount(10)).toBe(3);
+    expect(getChestCount(11)).toBe(2);
+    expect(getChestCount(16)).toBe(3);
   });
 });

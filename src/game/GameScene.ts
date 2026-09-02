@@ -19,11 +19,24 @@ import {
   equipmentTierLabel,
   getEquipmentTier,
   isCarryableEquipment,
+  isDarkGoldEquipment,
   resolveSetBonus,
+  rollBossRewardTiers,
+  shouldCriticalHit,
   shouldDropDarkGoldFromChest,
-  shouldDropPurpleFromBoss,
 } from './equipment';
 import { canStackItems, itemQuantity } from './inventory';
+import { rollMonsterLootType, rollRegularLootType } from './loot';
+import {
+  createMerchantOffers,
+  getFloorMaterial,
+  getRegionMaterial,
+  MATERIAL_VAULT_KEY,
+  mergeMaterials,
+  parseMaterialVault,
+  rollJarEquipmentTier,
+  spendRegionMaterials,
+} from './materials';
 import {
   chooseAltarFloors,
   chooseEscapeScrollFloor,
@@ -43,7 +56,7 @@ import {
   type TownLoadoutSelection,
   type VaultEquipment,
 } from './gilding';
-import { advanceStage, getBossStats, getEnemyCount } from './progression';
+import { advanceStage, getBossStats, getChestCount, getEnemyCount } from './progression';
 import { getRegionTheme } from './themes';
 import {
   getRegion,
@@ -66,11 +79,14 @@ import {
   type GildingOption,
   type Item,
   type ItemType,
+  type MerchantOffer,
+  type MerchantReveal,
   type MoveDirection,
   type Rarity,
   type RegionOption,
   type RunStatus,
   type TownLoadoutOption,
+  type TownMaterialBalance,
   type UiState,
 } from './types';
 
@@ -78,15 +94,16 @@ const TILE_SIZE = 32;
 const FOV_RADIUS = 7;
 const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
 const TOWN_CHEST = { x: 8, y: 10 };
+const TOWN_MERCHANT = { x: 20, y: 10 };
 
 const PURPLE_SETS: Array<{
   id: string;
   name: string;
   bonus: EquipmentAffix;
 }> = [
-  { id: 'grave-oath', name: '守墓誓约', bonus: { stat: 'attack', value: 5, label: '誓约之刃' } },
-  { id: 'deep-echo', name: '深渊回响', bonus: { stat: 'defense', value: 5, label: '回响壁垒' } },
-  { id: 'ember-crown', name: '余烬王冠', bonus: { stat: 'attack', value: 4, label: '余烬共鸣' } },
+  { id: 'grave-oath', name: '守墓誓约', bonus: { stat: 'bleed', value: 3, label: '血色誓约' } },
+  { id: 'deep-echo', name: '深渊回响', bonus: { stat: 'maxHp', value: 12, label: '深渊血脉' } },
+  { id: 'ember-crown', name: '余烬王冠', bonus: { stat: 'crit', value: 20, label: '余烬处决' } },
 ];
 
 interface PlayerState extends Point {
@@ -117,6 +134,7 @@ export class GameScene extends Phaser.Scene {
   private chests: Chest[] = [];
   private altar?: Altar;
   private townChestSprite?: Phaser.GameObjects.Sprite;
+  private townMerchantSprite?: Phaser.GameObjects.Sprite;
   private explored = new Set<string>();
   private visible = new Set<string>();
   private bossStage = false;
@@ -124,10 +142,15 @@ export class GameScene extends Phaser.Scene {
   private altarFloors = new Map<number, Set<number>>();
   private gildingOptions: GildingOption[] | null = null;
   private pendingGilded: PendingGildedEquipment[] = [];
+  private pendingMaterials: TownMaterialBalance[] = [];
   private vault: VaultEquipment[] = [];
+  private townMaterials: TownMaterialBalance[] = [];
   private townLoadout: TownLoadoutSelection = {};
   private townLoadoutOptions: TownLoadoutOption[] | null = null;
   private regionOptions: RegionOption[] | null = null;
+  private merchantOffers: MerchantOffer[] | null = null;
+  private merchantReveal: MerchantReveal | null = null;
+  private merchantRevealSequence = 0;
   private discardCandidate: DiscardCandidate | null = null;
   private highestUnlockedRegion = 0;
   private escapeScrollFloor = 1;
@@ -210,9 +233,11 @@ export class GameScene extends Phaser.Scene {
         this.handleCommand({
           action: this.discardCandidate
             ? 'dismiss-discard'
+            : (this.merchantOffers
+            ? 'dismiss-merchant'
             : (this.regionOptions
             ? 'dismiss-region-map'
-            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding')),
+            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))),
         });
       }
     });
@@ -242,6 +267,22 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.discardCandidate) return;
+    if (command.action === 'dismiss-merchant') {
+      this.merchantOffers = null;
+      this.merchantReveal = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'dismiss-merchant-reveal') {
+      this.merchantReveal = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'buy-region-jar') {
+      this.buyRegionJar(command.regionIndex);
+      return;
+    }
+    if (this.merchantOffers) return;
     if (command.action === 'dismiss-region-map') {
       this.regionOptions = null;
       this.emitUiState();
@@ -325,11 +366,15 @@ export class GameScene extends Phaser.Scene {
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.loadTownStorage();
     this.applyTownLoadout();
+    this.player.hp = this.totalMaxHp;
     this.inventory = [];
     this.pendingGilded = [];
+    this.pendingMaterials = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
     this.regionOptions = null;
+    this.merchantOffers = null;
+    this.merchantReveal = null;
     this.discardCandidate = null;
     this.altarFloors.clear();
     this.logEntries = status === 'active' ? ['铁门在身后合拢。'] : [];
@@ -348,14 +393,18 @@ export class GameScene extends Phaser.Scene {
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.inventory = [];
     this.pendingGilded = [];
+    this.pendingMaterials = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
     this.regionOptions = null;
+    this.merchantOffers = null;
+    this.merchantReveal = null;
     this.discardCandidate = null;
     this.altarFloors.clear();
     this.loadTownStorage();
     this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
     this.applyTownLoadout();
+    this.player.hp = this.totalMaxHp;
     this.logEntries = [message];
 
     this.clearLevel();
@@ -387,6 +436,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private clearLevel(): void {
+    for (const chest of this.chests) {
+      if (chest.effect) this.tweens.killTweensOf(chest.effect.list);
+    }
     this.mapGroup?.clear(true, true);
     this.objectGroup?.clear(true, true);
     this.actorGroup?.clear(true, true);
@@ -395,6 +447,7 @@ export class GameScene extends Phaser.Scene {
     this.chests = [];
     this.altar = undefined;
     this.townChestSprite = undefined;
+    this.townMerchantSprite = undefined;
     this.gildingOptions = null;
     this.discardCandidate = null;
   }
@@ -463,6 +516,13 @@ export class GameScene extends Phaser.Scene {
       .setDepth(6);
     this.objectGroup.add(this.townChestSprite);
 
+    this.townMerchantSprite = this.add
+      .sprite(TOWN_MERCHANT.x * TILE_SIZE + 16, TOWN_MERCHANT.y * TILE_SIZE + 16, 'tiny-dungeon', 85)
+      .setScale(2.2)
+      .setTint(0xd7ba79)
+      .setDepth(6);
+    this.objectGroup.add(this.townMerchantSprite);
+
     const gateLabel = this.add
       .text(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 48, '远征地图', {
         fontFamily: 'Microsoft YaHei, sans-serif',
@@ -483,7 +543,17 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(7);
-    this.objectGroup.addMultiple([gateLabel, chestLabel]);
+    const merchantLabel = this.add
+      .text(TOWN_MERCHANT.x * TILE_SIZE + 16, TOWN_MERCHANT.y * TILE_SIZE + 46, '罐商', {
+        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontSize: '12px',
+        color: '#f0dfb8',
+        backgroundColor: '#332919',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(7);
+    this.objectGroup.addMultiple([gateLabel, chestLabel, merchantLabel]);
 
     for (const point of [{ x: 7, y: 6 }, { x: 21, y: 6 }, { x: 7, y: 14 }, { x: 21, y: 14 }]) {
       const lantern = this.add
@@ -507,6 +577,10 @@ export class GameScene extends Phaser.Scene {
     if (!isWalkable(this.dungeon.tiles, target)) return;
     if (target.x === TOWN_CHEST.x && target.y === TOWN_CHEST.y) {
       this.openTownLoadout();
+      return;
+    }
+    if (target.x === TOWN_MERCHANT.x && target.y === TOWN_MERCHANT.y) {
+      this.openMerchant();
       return;
     }
     if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
@@ -601,7 +675,7 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    const chestCount = Math.min(3 + Math.floor(this.floor / 2), 5);
+    const chestCount = getChestCount(this.floor);
     const shouldOfferEscapeScroll = shouldPlaceEscapeScroll(
       this.floor,
       this.escapeScrollFloor,
@@ -647,6 +721,14 @@ export class GameScene extends Phaser.Scene {
     this.objectGroup.add(this.exitSprite);
 
     for (const chest of this.chests) {
+      if (
+        chest.loot &&
+        (chest.loot.type === 'weapon' || chest.loot.type === 'armor') &&
+        isDarkGoldEquipment(chest.loot)
+      ) {
+        chest.effect = this.createDarkGoldChestEffect(chest.x, chest.y);
+        this.objectGroup.add(chest.effect);
+      }
       chest.sprite = this.add
         .sprite(chest.x * TILE_SIZE + 16, chest.y * TILE_SIZE + 16, 'tiny-dungeon', 72)
         .setScale(2)
@@ -680,6 +762,49 @@ export class GameScene extends Phaser.Scene {
       .setTint(0xf8efc4)
       .setDepth(8);
     this.actorGroup.add(this.playerSprite);
+  }
+
+  private createDarkGoldChestEffect(x: number, y: number): Phaser.GameObjects.Container {
+    const wideBeam = this.add
+      .rectangle(0, 0, 30, 78, 0xf0a13e, 0.16)
+      .setOrigin(0.5, 1)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const coreBeam = this.add
+      .rectangle(0, 0, 9, 92, 0xffe6a0, 0.34)
+      .setOrigin(0.5, 1)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const groundGlow = this.add
+      .ellipse(0, 0, 48, 20, 0xffb348, 0.24)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const sparkle = this.add
+      .sprite(0, -70, 'tiny-dungeon', 60)
+      .setScale(1.4)
+      .setTint(0xffdc82)
+      .setAlpha(0.8)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const container = this.add
+      .container(x * TILE_SIZE + 16, y * TILE_SIZE + 18, [wideBeam, coreBeam, groundGlow, sparkle])
+      .setDepth(5);
+
+    this.tweens.add({
+      targets: [wideBeam, coreBeam, groundGlow],
+      alpha: { from: 0.16, to: 0.48 },
+      scaleX: { from: 0.82, to: 1.18 },
+      duration: 760,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    this.tweens.add({
+      targets: sparkle,
+      y: -84,
+      alpha: { from: 0.45, to: 1 },
+      duration: 920,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+    return container;
   }
 
   private attemptMove(step: Step): void {
@@ -726,7 +851,7 @@ export class GameScene extends Phaser.Scene {
       const nextStage = advanceStage(this.floor, this.bossStage);
       this.floor = nextStage.floor;
       this.bossStage = nextStage.bossStage;
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + 3);
+      this.player.hp = Math.min(this.totalMaxHp, this.player.hp + 3);
       if (this.bossStage) {
         this.pushLog(`第 ${this.floor} 层尽头的大门缓缓开启。`);
       } else if (previousBossStage) {
@@ -750,10 +875,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private attackEnemy(enemy: Enemy): void {
-    const damage = Math.max(1, this.totalAttack - enemy.defense + this.random.integer(-1, 1));
+    const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
+    const baseDamage = Math.max(1, this.totalAttack - enemy.defense + this.random.integer(-1, 1));
+    const critical = setBonus?.stat === 'crit' && shouldCriticalHit(setBonus.value, this.random.next());
+    const damage = critical ? baseDamage * 2 : baseDamage;
     enemy.hp -= damage;
     this.playSound('hit', 0.42);
-    this.showDamage(enemy.x, enemy.y, damage, '#f6d06f');
+    this.showDamage(enemy.x, enemy.y, damage, critical ? '#fff1a3' : '#f6d06f');
     enemy.sprite?.setTintFill(0xf5dfc4);
     this.time.delayedCall(70, () => {
       if (!enemy.sprite?.active) return;
@@ -761,11 +889,20 @@ export class GameScene extends Phaser.Scene {
     });
 
     if (enemy.hp > 0) {
-      this.pushLog(`你击中${enemy.name}，造成 ${damage} 点伤害。`);
+      this.pushLog(`${critical ? '暴击！' : ''}你击中${enemy.name}，造成 ${damage} 点伤害。`);
+      if (setBonus?.stat === 'bleed') {
+        enemy.bleedDamage = setBonus.value;
+        enemy.bleedTurns = 2;
+        this.pushLog(`${enemy.name}陷入流血，接下来 2 回合持续受伤。`);
+      }
       enemy.alerted = true;
       return;
     }
 
+    this.defeatEnemy(enemy);
+  }
+
+  private defeatEnemy(enemy: Enemy): void {
     this.gold += enemy.reward;
     this.pushLog(`${enemy.name}倒下，找到 ${enemy.reward} 枚古币。`);
     this.playSound('coins', 0.28);
@@ -779,19 +916,34 @@ export class GameScene extends Phaser.Scene {
         .setPosition(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16)
         .setTint(getRegionTheme(this.floor).exitTint)
         .setVisible(true);
-      const rewardType = this.random.next() < 0.5 ? 'weapon' : 'armor';
-      const rewardTier: EquipmentTier = shouldDropPurpleFromBoss(this.floor) ? 'purple' : 'common';
-      const reward = this.createItem(rewardType, 'rare', rewardTier);
-      this.addItem(reward);
-      this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
+      const rewardTiers = rollBossRewardTiers(this.floor, this.random.next(), this.random.next());
+      const rewardTypes = ['weapon', 'armor'] as const;
+      for (let index = 0; index < rewardTypes.length; index += 1) {
+        const reward = this.createItem(rewardTypes[index], 'rare', rewardTiers[index]);
+        this.addItem(reward);
+        this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
+      }
       this.pushLog('守层者倒下，通往下层的楼梯出现了。');
-    } else if (this.random.next() < 0.24) {
-      this.addItem(this.createLoot());
+    } else {
+      const loot = this.createMonsterLoot();
+      if (loot) this.addItem(loot);
     }
   }
 
   private runEnemyTurns(): void {
     for (const enemy of this.enemies) {
+      if ((enemy.bleedTurns ?? 0) > 0 && (enemy.bleedDamage ?? 0) > 0) {
+        const bleedDamage = enemy.bleedDamage!;
+        enemy.hp -= bleedDamage;
+        enemy.bleedTurns = Math.max(0, enemy.bleedTurns! - 1);
+        this.showDamage(enemy.x, enemy.y, bleedDamage, '#e45f6c');
+        this.pushLog(`${enemy.name}受到 ${bleedDamage} 点流血伤害。`);
+        if (enemy.hp <= 0) {
+          this.defeatEnemy(enemy);
+          continue;
+        }
+      }
+
       const distance = this.distance(enemy, this.player);
       if (distance === 1) {
         this.enemyAttack(enemy);
@@ -848,9 +1000,17 @@ export class GameScene extends Phaser.Scene {
   }
 
   private openChest(chest: Chest): void {
+    if (chest.effect) {
+      this.tweens.killTweensOf(chest.effect.list);
+      chest.effect.destroy(true);
+    }
     chest.sprite?.destroy();
     this.chests = this.chests.filter((candidate) => candidate.id !== chest.id);
     this.playSound('open', 0.38);
+    if (!chest.loot) {
+      this.pushLog('打开旧木箱，里面空空如也。');
+      return;
+    }
     const tier = chest.loot.type === 'weapon' || chest.loot.type === 'armor'
       ? `${equipmentTierLabel(getEquipmentTier(chest.loot))} `
       : '';
@@ -887,6 +1047,15 @@ export class GameScene extends Phaser.Scene {
           power: item.power,
           source: 'inventory',
         });
+      } else if (item.type === 'material' && !item.gilded) {
+        options.push({
+          targetId: item.id,
+          name: item.name,
+          type: 'material',
+          power: 0,
+          source: 'inventory',
+          quantity: itemQuantity(item),
+        });
       }
     }
 
@@ -904,6 +1073,7 @@ export class GameScene extends Phaser.Scene {
   private loadTownStorage(): void {
     this.vault = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
     this.townLoadout = parseTownLoadout(localStorage.getItem(TOWN_LOADOUT_KEY));
+    this.townMaterials = parseMaterialVault(localStorage.getItem(MATERIAL_VAULT_KEY));
 
     const legacy = parseGildedLoadout(localStorage.getItem(GILDED_LOADOUT_KEY));
     const migrated = mergeGildedEquipment(this.vault, legacy);
@@ -927,6 +1097,10 @@ export class GameScene extends Phaser.Scene {
   private persistTownStorage(): void {
     localStorage.setItem(GILDED_VAULT_KEY, JSON.stringify(this.vault));
     localStorage.setItem(TOWN_LOADOUT_KEY, JSON.stringify(this.townLoadout));
+  }
+
+  private persistMaterialStorage(): void {
+    localStorage.setItem(MATERIAL_VAULT_KEY, JSON.stringify(this.townMaterials));
   }
 
   private applyTownLoadout(): void {
@@ -1009,6 +1183,66 @@ export class GameScene extends Phaser.Scene {
     this.emitUiState();
   }
 
+  private openMerchant(): void {
+    this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.townMaterials = parseMaterialVault(localStorage.getItem(MATERIAL_VAULT_KEY));
+    this.merchantOffers = createMerchantOffers(this.highestUnlockedRegion, this.townMaterials);
+    this.merchantReveal = null;
+    this.emitUiState();
+  }
+
+  private buyRegionJar(regionIndex: number): void {
+    if (
+      this.status !== 'town' ||
+      this.merchantReveal ||
+      !this.merchantOffers?.some((offer) => offer.regionIndex === regionIndex)
+    ) {
+      return;
+    }
+
+    const trade = spendRegionMaterials(this.townMaterials, regionIndex);
+    if (!trade.success) {
+      const material = getRegionMaterial(regionIndex);
+      this.pushLog(`${material.name}不足，地区罐子需要 100 个。`);
+      this.emitUiState();
+      return;
+    }
+
+    this.townMaterials = trade.balances;
+    const tier = rollJarEquipmentTier(regionIndex, this.random.next());
+    const type = this.random.next() < 0.5 ? 'weapon' : 'armor';
+    const region = getRegion(regionIndex);
+    const reward = this.createItem(type, 'rare', tier, region.startFloor + 4);
+    const pending: PendingGildedEquipment = {
+      type,
+      name: reward.name,
+      power: reward.power,
+      rarity: reward.rarity,
+      gilded: true,
+      tier,
+      affixes: reward.affixes?.map((affix) => ({ ...affix })),
+      setId: reward.setId,
+      setName: reward.setName,
+      setBonus: reward.setBonus ? { ...reward.setBonus } : undefined,
+    };
+    const merged = mergePendingGildedEquipment(this.vault, [pending]);
+    this.vault = merged.vault;
+    this.persistTownStorage();
+    this.persistMaterialStorage();
+    this.merchantOffers = createMerchantOffers(this.highestUnlockedRegion, this.townMaterials);
+    this.merchantReveal = {
+      sequence: ++this.merchantRevealSequence,
+      regionName: region.name,
+      name: reward.name,
+      type,
+      power: reward.power,
+      tier,
+    };
+    this.playSound(tier === 'gold' ? 'open' : 'coins', tier === 'purple' ? 0.62 : 0.5);
+    this.pushLog(`打开${region.name}罐子，获得${equipmentTierLabel(tier)}：${reward.name}。`);
+    this.emitUiState();
+  }
+
   private equipTownItem(targetId: string): void {
     if (this.status !== 'town' || !this.townLoadoutOptions?.some((option) => option.targetId === targetId)) return;
 
@@ -1032,6 +1266,25 @@ export class GameScene extends Phaser.Scene {
 
   private gildEquipment(targetId: string): void {
     if (!this.gildingOptions?.some((option) => option.targetId === targetId) || !this.altar || this.altar.used) return;
+
+    const material = this.inventory.find((item) => item.id === targetId && item.type === 'material');
+    if (material?.materialRegion !== undefined && !material.gilded) {
+      material.gilded = true;
+      this.pendingMaterials = mergeMaterials(this.pendingMaterials, [{
+        ...getRegionMaterial(material.materialRegion),
+        quantity: itemQuantity(material),
+      }]);
+      this.altar.used = true;
+      if (this.altar.sprite) {
+        this.tweens.killTweensOf(this.altar.sprite);
+        this.altar.sprite.stop().setTint(0x756b56).setAlpha(0.55);
+      }
+      this.gildingOptions = null;
+      this.pushLog(`${material.name} ×${itemQuantity(material)} 已完成铭金，可用卷轴带回城镇。`);
+      this.playSound('coins', 0.42);
+      this.finishTurn();
+      return;
+    }
 
     let gilded: Equipment | undefined;
     let type: 'weapon' | 'armor' | undefined;
@@ -1079,7 +1332,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private addItem(item: Item): void {
-    if (item.type === 'potion') {
+    if (item.type === 'potion' || item.type === 'material') {
       const existing = this.inventory.find((candidate) => canStackItems(candidate, item));
       if (existing) {
         existing.quantity = itemQuantity(existing) + itemQuantity(item);
@@ -1156,6 +1409,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   private removePendingEquipment(item: Item): void {
+    if (item.type === 'material' && item.gilded && item.materialRegion !== undefined) {
+      const quantity = itemQuantity(item);
+      this.pendingMaterials = this.pendingMaterials.flatMap((material) => {
+        if (material.regionIndex !== item.materialRegion) return [material];
+        const remaining = material.quantity - quantity;
+        return remaining > 0 ? [{ ...material, quantity: remaining }] : [];
+      });
+      return;
+    }
     if ((item.type !== 'weapon' && item.type !== 'armor') || !item.gilded || item.vaultId) return;
     this.pendingGilded = this.pendingGilded.filter(
       (equipment) => equipment.type !== item.type || !equipmentMatchesItem(equipment, item),
@@ -1232,13 +1494,14 @@ export class GameScene extends Phaser.Scene {
 
     if (item.type === 'potion') {
       const before = this.player.hp;
-      this.player.hp = Math.min(this.player.maxHp, this.player.hp + item.power);
+      this.player.hp = Math.min(this.totalMaxHp, this.player.hp + item.power);
       const quantity = itemQuantity(item);
       if (quantity > 1) item.quantity = quantity - 1;
       else this.inventory.splice(index, 1);
       this.pushLog(`饮下药剂，恢复 ${this.player.hp - before} 点生命。`);
       this.playSound('equip', 0.35);
     } else if (item.type === 'weapon') {
+      const previousMaxHp = this.totalMaxHp;
       const old = this.weapon;
       this.weapon = {
         name: item.name,
@@ -1254,9 +1517,11 @@ export class GameScene extends Phaser.Scene {
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
+      this.adjustHealthForEquipmentChange(previousMaxHp);
       this.pushLog(`换上${item.name}，攻击提升至 ${this.totalAttack}。`);
       this.playSound('equip', 0.35);
-    } else {
+    } else if (item.type === 'armor') {
+      const previousMaxHp = this.totalMaxHp;
       const old = this.armor;
       this.armor = {
         name: item.name,
@@ -1272,8 +1537,11 @@ export class GameScene extends Phaser.Scene {
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
+      this.adjustHealthForEquipmentChange(previousMaxHp);
       this.pushLog(`穿上${item.name}，防御提升至 ${this.totalDefense}。`);
       this.playSound('equip', 0.35);
+    } else {
+      return;
     }
 
     this.emitUiState();
@@ -1290,11 +1558,18 @@ export class GameScene extends Phaser.Scene {
 
     this.inventory.splice(scrollIndex, 1);
     const carried = this.saveGildedEquipment();
+    const carriedMaterials = this.saveGildedMaterials();
     this.unlockRegionAtFloor(this.floor);
     const carriedMessage = carried.length > 0
       ? `，以及铭金装备：${carried.map((item) => item.name).join('、')}`
       : '';
-    this.completeReturn(`你带回 ${this.gold} 枚古币${carriedMessage}。`, carried.length > 0);
+    const materialMessage = carriedMaterials.length > 0
+      ? `，材料：${carriedMaterials.map((item) => `${item.name} ×${item.quantity}`).join('、')}`
+      : '';
+    this.completeReturn(
+      `你带回 ${this.gold} 枚古币${carriedMessage}${materialMessage}。`,
+      carried.length > 0,
+    );
   }
 
   private saveGildedEquipment(): VaultEquipment[] {
@@ -1305,6 +1580,14 @@ export class GameScene extends Phaser.Scene {
     localStorage.setItem(GILDED_VAULT_KEY, JSON.stringify(this.vault));
     const persisted = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
     return merged.carried.filter((carried) => persisted.some((item) => item.id === carried.id));
+  }
+
+  private saveGildedMaterials(): TownMaterialBalance[] {
+    if (this.pendingMaterials.length === 0) return [];
+    const stored = parseMaterialVault(localStorage.getItem(MATERIAL_VAULT_KEY));
+    this.townMaterials = mergeMaterials(stored, this.pendingMaterials);
+    this.persistMaterialStorage();
+    return this.pendingMaterials.map((material) => ({ ...material }));
   }
 
   private returnToTown(): void {
@@ -1321,14 +1604,17 @@ export class GameScene extends Phaser.Scene {
     if (showTownLoadout) this.openTownLoadout();
   }
 
-  private createLoot(): Item {
-    const roll = this.random.next();
-    if (roll < 0.45) return this.createItem('potion');
-    if (roll < 0.73) return this.createItem('weapon');
-    return this.createItem('armor');
+  private createLoot(): Item | undefined {
+    const type = rollRegularLootType(this.random.next());
+    return type === 'nothing' ? undefined : this.createItem(type);
   }
 
-  private createChestLoot(): Item {
+  private createMonsterLoot(): Item | undefined {
+    const type = rollMonsterLootType(this.random.next());
+    return type === 'nothing' ? undefined : this.createItem(type);
+  }
+
+  private createChestLoot(): Item | undefined {
     if (shouldDropDarkGoldFromChest(this.random.next())) {
       const type = this.random.next() < 0.5 ? 'weapon' : 'armor';
       return this.createItem(type, 'rare', 'dark-gold');
@@ -1340,23 +1626,41 @@ export class GameScene extends Phaser.Scene {
     type: ItemType,
     forcedRarity?: Rarity,
     tier: EquipmentTier = 'common',
+    sourceFloor = this.floor,
   ): Item {
-    const rarityRoll = this.random.next() + Math.min(this.floor * 0.025, 0.2);
+    const rarityRoll = this.random.next() + Math.min(sourceFloor * 0.025, 0.2);
     const rolledRarity: Rarity = rarityRoll > 0.88 ? 'rare' : rarityRoll > 0.58 ? 'uncommon' : 'common';
     const rarity = forcedRarity ?? rolledRarity;
     const rarityPower = rarity === 'rare' ? 3 : rarity === 'uncommon' ? 1 : 0;
-    const id = `item-${this.floor}-${this.itemSerial++}`;
+    const id = `item-${sourceFloor}-${this.itemSerial++}`;
 
     if (type === 'scroll') {
       return { id, type, name: '逃脱卷轴', description: '带着本次古币返回地面', power: 0, rarity: 'rare' };
     }
     if (type === 'potion') {
-      const power = 7 + this.floor * 2 + rarityPower;
+      const power = 7 + sourceFloor * 2 + rarityPower;
       return { id, type, name: rarity === 'rare' ? '赤红秘药' : '止血药剂', description: `恢复 ${power} 点生命`, power, rarity };
     }
 
-    const power = 2 + Math.ceil(this.floor * 0.8) + rarityPower;
-    const affixes = tier === 'dark-gold' || tier === 'purple' ? [this.createEquipmentAffix()] : [];
+    if (type === 'material') {
+      const material = getFloorMaterial(sourceFloor);
+      const quantity = this.random.integer(1, 3);
+      return {
+        id,
+        type,
+        name: material.name,
+        description: `${getRegion(material.regionIndex).name}材料`,
+        power: 0,
+        rarity: 'common',
+        quantity,
+        materialRegion: material.regionIndex,
+      };
+    }
+
+    const power = 2 + Math.ceil(sourceFloor * 0.8) + rarityPower;
+    const affixes = tier === 'dark-gold' || tier === 'purple'
+      ? [this.createEquipmentAffix(type, tier, sourceFloor)]
+      : [];
     if (tier === 'purple') {
       const set = PURPLE_SETS[this.random.integer(0, PURPLE_SETS.length - 1)];
       return {
@@ -1408,9 +1712,20 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
-  private createEquipmentAffix(): EquipmentAffix {
+  private createEquipmentAffix(
+    type: 'weapon' | 'armor',
+    tier: EquipmentTier,
+    sourceFloor = this.floor,
+  ): EquipmentAffix {
+    if (tier === 'dark-gold' && type === 'armor') {
+      return {
+        stat: 'maxHp',
+        value: 6 + Math.ceil(sourceFloor / 5) + this.random.integer(0, 2),
+        label: '不朽',
+      };
+    }
     const stat = this.random.next() < 0.5 ? 'attack' : 'defense';
-    const value = Math.max(1, Math.ceil(this.floor / 10) + this.random.integer(0, 1));
+    const value = Math.max(1, Math.ceil(sourceFloor / 10) + this.random.integer(0, 1));
     return {
       stat,
       value,
@@ -1520,7 +1835,7 @@ export class GameScene extends Phaser.Scene {
       inTown: this.inTown,
       areaLabel: this.inTown ? '灰炉镇' : (this.bossStage ? `第 ${this.floor} 层守门大殿` : `第 ${this.floor} 层`),
       hp: this.player.hp,
-      maxHp: this.player.maxHp,
+      maxHp: this.totalMaxHp,
       attack: this.totalAttack,
       defense: this.totalDefense,
       gold: this.gold,
@@ -1539,6 +1854,10 @@ export class GameScene extends Phaser.Scene {
       regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
       discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
       activeSetBonus,
+      pendingMaterials: this.pendingMaterials.map((material) => ({ ...material })),
+      townMaterials: this.townMaterials.map((material) => ({ ...material })),
+      merchantOffers: this.merchantOffers?.map((offer) => ({ ...offer })) ?? null,
+      merchantReveal: this.merchantReveal ? { ...this.merchantReveal } : null,
       boss: boss ? { name: boss.name, hp: boss.hp, maxHp: boss.maxHp } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));
@@ -1560,5 +1879,18 @@ export class GameScene extends Phaser.Scene {
       equipmentAffixBonus(this.weapon, 'defense') +
       equipmentAffixBonus(this.armor, 'defense') +
       (setBonus?.stat === 'defense' ? setBonus.value : 0);
+  }
+
+  private get totalMaxHp(): number {
+    const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
+    return this.player.maxHp +
+      equipmentAffixBonus(this.weapon, 'maxHp') +
+      equipmentAffixBonus(this.armor, 'maxHp') +
+      (setBonus?.stat === 'maxHp' ? setBonus.value : 0);
+  }
+
+  private adjustHealthForEquipmentChange(previousMaxHp: number): void {
+    const nextMaxHp = this.totalMaxHp;
+    this.player.hp = Math.min(nextMaxHp, this.player.hp + Math.max(0, nextMaxHp - previousMaxHp));
   }
 }

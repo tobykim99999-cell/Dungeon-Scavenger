@@ -3,7 +3,14 @@ import { createIcons, icons } from 'lucide';
 import './style.css';
 import { GameScene } from './game/GameScene';
 import { equipmentTierLabel, getEquipmentTier } from './game/equipment';
-import { COMMAND_EVENT, UI_EVENT, type GameCommand, type Item, type UiState } from './game/types';
+import {
+  COMMAND_EVENT,
+  UI_EVENT,
+  type EquipmentAffix,
+  type GameCommand,
+  type Item,
+  type UiState,
+} from './game/types';
 
 const getElement = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -53,12 +60,22 @@ const townVaultCount = getElement('town-vault-count');
 const regionMapModal = getElement('region-map-modal');
 const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
+const merchantModal = getElement('merchant-modal');
+const merchantOffers = getElement('merchant-offers');
+const dismissMerchantButton = getElement<HTMLButtonElement>('dismiss-merchant-button');
+const merchantReveal = getElement('merchant-reveal');
+const merchantRevealKicker = getElement('merchant-reveal-kicker');
+const merchantRevealItemIcon = getElement('merchant-reveal-item-icon');
+const merchantRevealName = getElement('merchant-reveal-name');
+const merchantRevealPower = getElement('merchant-reveal-power');
 const discardModal = getElement('discard-modal');
 const discardItemName = getElement('discard-item-name');
 const discardKicker = getElement('discard-kicker');
 const discardWarning = getElement('discard-warning');
 const dismissDiscardButton = getElement<HTMLButtonElement>('dismiss-discard-button');
 const confirmDiscardButton = getElement<HTMLButtonElement>('confirm-discard-button');
+let merchantRevealTimer: number | undefined;
+let activeMerchantRevealSequence = 0;
 
 function sendCommand(command: GameCommand): void {
   window.dispatchEvent(new CustomEvent<GameCommand>(COMMAND_EVENT, { detail: command }));
@@ -70,12 +87,23 @@ function iconForItem(item: Item): string {
     weapon: 'sword',
     armor: 'shield',
     scroll: 'scroll-text',
+    material: 'gem',
   };
   return iconsByType[item.type];
 }
 
-function affixText(affix: { stat: 'attack' | 'defense'; value: number; label: string }): string {
-  return `${affix.label} · ${affix.stat === 'attack' ? '攻击' : '防御'} +${affix.value}`;
+function affixText(affix: EquipmentAffix): string {
+  const statLabels: Record<EquipmentAffix['stat'], string> = {
+    attack: '攻击',
+    defense: '防御',
+    maxHp: '生命上限',
+    crit: '暴击率',
+    bleed: '流血伤害',
+  };
+  const value = affix.stat === 'crit'
+    ? ` +${affix.value}%`
+    : (affix.stat === 'bleed' ? ` +${affix.value}/回合` : ` +${affix.value}`);
+  return `${affix.label} · ${statLabels[affix.stat]}${value}`;
 }
 
 function renderInventory(items: Item[], capacity: number): void {
@@ -92,7 +120,10 @@ function renderInventory(items: Item[], capacity: number): void {
       const itemButton = document.createElement('button');
       itemButton.type = 'button';
       itemButton.className = 'bag-item-button';
-      itemButton.title = `${item.name}：${item.description}`;
+      itemButton.disabled = item.type === 'material';
+      itemButton.title = item.type === 'material'
+        ? `${item.name}：材料不能直接使用或装备`
+        : `${item.name}：${item.description}`;
       itemButton.setAttribute('aria-label', `${item.name}，${item.description}${quantity > 1 ? `，数量 ${quantity}` : ''}`);
       itemButton.innerHTML = `
         <span class="slot-index">${index + 1}</span>
@@ -103,7 +134,9 @@ function renderInventory(items: Item[], capacity: number): void {
         ${item.setName ? `<em class="slot-set">套装 · ${item.setName}</em>` : ''}
         ${quantity > 1 ? `<b class="slot-quantity">×${quantity}</b>` : ''}
       `;
-      itemButton.addEventListener('click', () => sendCommand({ action: 'use-item', index }));
+      if (item.type !== 'material') {
+        itemButton.addEventListener('click', () => sendCommand({ action: 'use-item', index }));
+      }
 
       const discardButton = document.createElement('button');
       discardButton.type = 'button';
@@ -154,12 +187,12 @@ function renderGilding(state: UiState): void {
     button.type = 'button';
     button.className = 'gilding-option';
     button.innerHTML = `
-      <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
+      <i data-lucide="${option.type === 'weapon' ? 'sword' : (option.type === 'armor' ? 'shield' : 'gem')}" aria-hidden="true"></i>
       <span>
         <small>${option.source === 'equipped' ? '当前装备' : '行囊装备'}</small>
         <strong>${option.name}</strong>
       </span>
-      <b>+${option.power}</b>
+      <b>${option.type === 'material' ? `×${option.quantity ?? 1}` : `+${option.power}`}</b>
     `;
     button.addEventListener('click', () => sendCommand({ action: 'gild-item', targetId: option.targetId }));
     gildingOptions.append(button);
@@ -297,6 +330,62 @@ function renderRegionMap(state: UiState): void {
   }
 }
 
+function renderMerchant(state: UiState): void {
+  const offers = state.merchantOffers;
+  const reveal = state.merchantReveal;
+  merchantModal.hidden = !offers;
+  merchantReveal.hidden = !reveal;
+  merchantReveal.className = reveal ? `merchant-reveal tier-${reveal.tier}` : 'merchant-reveal';
+  merchantOffers.replaceChildren();
+  if (!offers) {
+    if (merchantRevealTimer !== undefined) window.clearTimeout(merchantRevealTimer);
+    merchantRevealTimer = undefined;
+    activeMerchantRevealSequence = 0;
+    return;
+  }
+
+  if (reveal) {
+    merchantRevealKicker.textContent = `${reveal.regionName}罐 · ${equipmentTierLabel(reveal.tier)}`;
+    merchantRevealItemIcon.innerHTML = `<i data-lucide="${reveal.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>`;
+    merchantRevealName.textContent = reveal.name;
+    merchantRevealPower.textContent = `${reveal.type === 'weapon' ? '武器 · 攻击' : '护甲 · 防御'} +${reveal.power}`;
+    if (reveal.sequence !== activeMerchantRevealSequence) {
+      activeMerchantRevealSequence = reveal.sequence;
+      if (merchantRevealTimer !== undefined) window.clearTimeout(merchantRevealTimer);
+      merchantRevealTimer = window.setTimeout(() => {
+        sendCommand({ action: 'dismiss-merchant-reveal' });
+      }, 3000);
+    }
+  } else {
+    if (merchantRevealTimer !== undefined) window.clearTimeout(merchantRevealTimer);
+    merchantRevealTimer = undefined;
+    activeMerchantRevealSequence = 0;
+  }
+
+  for (const offer of offers) {
+    const item = document.createElement('article');
+    item.className = 'merchant-offer';
+    item.innerHTML = `
+      <i data-lucide="package-open" aria-hidden="true"></i>
+      <span>
+        <small>${offer.regionName} · ${offer.regionIndex === 0 ? '无紫装' : '紫装 5%'}</small>
+        <strong>${offer.regionName}罐</strong>
+        <em>${offer.name} ${offer.quantity} / ${offer.cost}</em>
+      </span>
+    `;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = !offer.canBuy || Boolean(reveal);
+    button.textContent = reveal ? '开启中' : (offer.canBuy ? '兑换' : '材料不足');
+    button.addEventListener('click', () => sendCommand({
+      action: 'buy-region-jar',
+      regionIndex: offer.regionIndex,
+    }));
+    item.append(button);
+    merchantOffers.append(item);
+  }
+}
+
 function renderState(state: UiState): void {
   areaValue.textContent = state.areaLabel;
   bossFloorMarker.classList.toggle('is-visible', state.isBossFloor);
@@ -338,16 +427,22 @@ function renderState(state: UiState): void {
   renderGilding(state);
   renderTownLoadout(state);
   renderRegionMap(state);
+  renderMerchant(state);
   renderDiscard(state);
   renderInventory(state.inventory, state.inventoryCapacity);
-  gildedStatus.hidden = state.pendingGilded.length === 0;
   gildedStatus.replaceChildren(
     ...state.pendingGilded.map((equipment) => {
       const row = document.createElement('span');
       row.textContent = `待带出 · ${equipmentTierLabel(getEquipmentTier(equipment))} · ${equipment.name} +${equipment.power}`;
       return row;
     }),
+    ...state.pendingMaterials.map((material) => {
+      const row = document.createElement('span');
+      row.textContent = `待带出 · ${material.name} ×${material.quantity}`;
+      return row;
+    }),
   );
+  gildedStatus.hidden = state.pendingGilded.length === 0 && state.pendingMaterials.length === 0;
   eventLog.replaceChildren(
     ...state.log.map((entry) => {
       const item = document.createElement('li');
@@ -378,6 +473,7 @@ returnTownButton.addEventListener('click', () => sendCommand({ action: 'return-t
 dismissGildingButton.addEventListener('click', () => sendCommand({ action: 'dismiss-gilding' }));
 dismissTownLoadoutButton.addEventListener('click', () => sendCommand({ action: 'dismiss-town-loadout' }));
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
+dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));
 confirmDiscardButton.addEventListener('click', () => sendCommand({ action: 'confirm-discard' }));
 
