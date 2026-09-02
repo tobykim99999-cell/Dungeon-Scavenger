@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceStage, getBossStats, getChestCount, getEnemyCount, hasBossAfterFloor } from '../src/game/progression';
+import { advanceStage, getBossStats, getChestCount, getEnemyCount, getEnemyStats, hasBossAfterFloor } from '../src/game/progression';
 import { INVENTORY_CAPACITY } from '../src/game/types';
 
 describe('boss floor progression', () => {
@@ -16,9 +16,9 @@ describe('boss floor progression', () => {
 
   it('gives the first boss its designed combat values', () => {
     expect(getBossStats(10)).toEqual({
-      hp: 75,
+      hp: 135,
       attack: 12,
-      defense: 3,
+      defense: 5,
       reward: 100,
     });
   });
@@ -31,6 +31,15 @@ describe('boss floor progression', () => {
     expect(floorTwenty.attack).toBeGreaterThan(floorTen.attack);
     expect(floorTwenty.defense).toBeGreaterThan(floorTen.defense);
     expect(floorTwenty.reward).toBeGreaterThan(floorTen.reward);
+  });
+});
+
+describe('normal enemy stat scaling', () => {
+  it('includes real defense growth in normal monster stats', () => {
+    const base = { hp: 11, attack: 5, defense: 1, reward: 8 };
+    expect(getEnemyStats(base, 1)).toEqual({ hp: 11, attack: 5, defense: 1, reward: 9 });
+    expect(getEnemyStats(base, 10)).toEqual({ hp: 29, attack: 13, defense: 3, reward: 18 });
+    expect(getEnemyStats(base, 20).defense).toBe(6);
   });
 });
 

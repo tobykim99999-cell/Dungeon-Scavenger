@@ -241,9 +241,32 @@ button:focus-visible {
   pointer-events: none;
 }
 
+.boss-skill-warning[hidden] {
+  display: none;
+}
+
+.boss-skill-warning {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #674247;
+  color: #ff998d;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.boss-skill-warning svg {
+  width: 14px;
+  height: 14px;
+}
+
 .gilding-modal[hidden],
 .town-loadout-modal[hidden],
 .artisan-modal[hidden],
+.bestiary-modal[hidden],
 .region-map-modal[hidden],
 .merchant-modal[hidden],
 .discard-modal[hidden] {
@@ -253,6 +276,7 @@ button:focus-visible {
 .gilding-modal,
 .town-loadout-modal,
 .artisan-modal,
+.bestiary-modal,
 .region-map-modal,
 .merchant-modal {
   position: absolute;
@@ -366,6 +390,8 @@ button:focus-visible {
 .town-loadout-modal > h2,
 .artisan-modal > p,
 .artisan-modal > h2,
+.bestiary-modal > p,
+.bestiary-modal > h2,
 .region-map-modal > p,
 .region-map-modal > h2,
 .merchant-modal > p,
@@ -376,6 +402,7 @@ button:focus-visible {
 .gilding-modal > p,
 .town-loadout-modal > p,
 .artisan-modal > p,
+.bestiary-modal > p,
 .region-map-modal > p,
 .merchant-modal > p {
   color: var(--gold);
@@ -386,6 +413,7 @@ button:focus-visible {
 .gilding-modal > h2,
 .town-loadout-modal > h2,
 .artisan-modal > h2,
+.bestiary-modal > h2,
 .region-map-modal > h2,
 .merchant-modal > h2 {
   margin-top: 5px;
@@ -1009,6 +1037,159 @@ button:focus-visible {
 .artisan-confirm-button svg {
   width: 16px;
   height: 16px;
+}
+
+.bestiary-emblem {
+  color: #8fc4d1;
+  border-color: #4f7680;
+  background: #17272b;
+}
+
+.bestiary-regions {
+  width: min(800px, 96%);
+  max-height: 390px;
+  margin-top: 14px;
+  padding-right: 5px;
+  overflow-y: auto;
+}
+
+.bestiary-region + .bestiary-region {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #39454a;
+}
+
+.bestiary-region-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.bestiary-region-heading small,
+.bestiary-region-heading strong {
+  display: block;
+}
+
+.bestiary-region-heading small {
+  color: #78909a;
+  font-size: 8px;
+}
+
+.bestiary-region-heading strong {
+  margin-top: 2px;
+  color: #dce9e9;
+  font-size: 12px;
+}
+
+.bestiary-region-heading > b {
+  color: #829196;
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.bestiary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.bestiary-card {
+  min-width: 0;
+  min-height: 102px;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid #3e494c;
+  border-radius: 4px;
+  background: #171b1c;
+}
+
+.bestiary-card.is-boss {
+  border-color: #75484d;
+  background: #21191b;
+}
+
+.bestiary-portrait {
+  width: 50px;
+  height: 50px;
+  border: 1px solid #5a747c;
+  border-radius: 3px;
+  background-color: #101516;
+  image-rendering: pixelated;
+}
+
+.bestiary-card-copy,
+.bestiary-card-copy small,
+.bestiary-card-copy strong {
+  min-width: 0;
+  display: block;
+}
+
+.bestiary-card-copy > small {
+  color: #718186;
+  font-size: 8px;
+}
+
+.bestiary-card.is-boss .bestiary-card-copy > small {
+  color: #c27478;
+}
+
+.bestiary-card-copy > strong {
+  margin-top: 2px;
+  color: #e0e7e5;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.bestiary-card-copy dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  margin: 7px 0 0;
+}
+
+.bestiary-card-copy dl > div {
+  min-width: 0;
+}
+
+.bestiary-card-copy dt {
+  color: #6f7d7d;
+  font-size: 8px;
+}
+
+.bestiary-card-copy dd {
+  margin: 2px 0 0;
+  color: #c9d0cd;
+  font-family: Bahnschrift, Consolas, monospace;
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+
+.bestiary-card-copy p {
+  margin: 7px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid #55383c;
+}
+
+.bestiary-card-copy p b,
+.bestiary-card-copy p span {
+  display: block;
+}
+
+.bestiary-card-copy p b {
+  color: #e18279;
+  font-size: 9px;
+}
+
+.bestiary-card-copy p span {
+  margin-top: 3px;
+  color: #a79b9b;
+  font-size: 8px;
+  line-height: 1.45;
 }
 
 .merchant-emblem {
@@ -2411,6 +2592,7 @@ footer {
   .gilding-modal,
   .town-loadout-modal,
   .artisan-modal,
+  .bestiary-modal,
   .region-map-modal,
   .merchant-modal,
   .discard-modal {
@@ -2436,6 +2618,20 @@ footer {
   }
 
   .artisan-modal .modal-close {
+    top: 10px;
+    right: 10px;
+  }
+
+  .bestiary-modal {
+    position: fixed;
+    inset: 8px;
+    z-index: 100;
+    align-content: start;
+    padding: 48px 18px 18px;
+    overflow-y: auto;
+  }
+
+  .bestiary-modal .modal-close {
     top: 10px;
     right: 10px;
   }
@@ -2524,6 +2720,15 @@ footer {
   .region-map-options {
     width: 100%;
     max-height: 220px;
+    grid-template-columns: 1fr;
+  }
+
+  .bestiary-regions {
+    width: 100%;
+    max-height: none;
+  }
+
+  .bestiary-grid {
     grid-template-columns: 1fr;
   }
 

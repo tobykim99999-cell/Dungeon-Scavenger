@@ -6,6 +6,7 @@ import {
   generateDungeon,
   generateTownMap,
   findPath,
+  findPathToAdjacent,
   isWalkable,
   MAP_HEIGHT,
   MAP_WIDTH,
@@ -14,6 +15,14 @@ import {
   type RandomSource,
 } from './dungeon';
 import { computeFieldOfView } from './fov';
+import {
+  getBossSkill,
+  getBossSkillById,
+  getBossSkillDamage,
+  getBossSkillTiles,
+  type BossSkillDefinition,
+} from './bossSkills';
+import { createBestiaryRegions } from './bestiary';
 import {
   equipmentAffixBonus,
   equipmentStorageId,
@@ -64,7 +73,7 @@ import {
   type TownLoadoutSelection,
   type VaultEquipment,
 } from './gilding';
-import { advanceStage, getBossStats, getChestCount, getEnemyCount } from './progression';
+import { advanceStage, getBossStats, getChestCount, getEnemyCount, getEnemyStats } from './progression';
 import { getRegionTheme } from './themes';
 import {
   getRegion,
@@ -78,6 +87,7 @@ import {
   UI_EVENT,
   type Altar,
   type ArtisanOption,
+  type BestiaryRegion,
   type Chest,
   type DiscardCandidate,
   type Enemy,
@@ -107,6 +117,7 @@ const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
 const TOWN_CHEST = { x: 8, y: 10 };
 const TOWN_MERCHANT = { x: 20, y: 10 };
 const TOWN_ARTISAN = { x: 14, y: 14 };
+const TOWN_ARCHIVIST = { x: 20, y: 14 };
 
 const PURPLE_SETS: Array<{
   id: string;
@@ -148,6 +159,7 @@ export class GameScene extends Phaser.Scene {
   private townChestSprite?: Phaser.GameObjects.Sprite;
   private townMerchantSprite?: Phaser.GameObjects.Sprite;
   private townArtisanSprite?: Phaser.GameObjects.Sprite;
+  private townArchivistSprite?: Phaser.GameObjects.Sprite;
   private explored = new Set<string>();
   private visible = new Set<string>();
   private bossStage = false;
@@ -164,6 +176,7 @@ export class GameScene extends Phaser.Scene {
   private artisanSelectedId: string | null = null;
   private enhancementConfirmation: EnhancementConfirmation | null = null;
   private enhancementResult: EnhancementResult | null = null;
+  private bestiaryRegions: BestiaryRegion[] | null = null;
   private regionOptions: RegionOption[] | null = null;
   private merchantOffers: MerchantOffer[] | null = null;
   private merchantReveal: MerchantReveal | null = null;
@@ -181,6 +194,7 @@ export class GameScene extends Phaser.Scene {
   private fogGraphics!: Phaser.GameObjects.Graphics;
   private pointerHintGraphics!: Phaser.GameObjects.Graphics;
   private autoTargetGraphics!: Phaser.GameObjects.Graphics;
+  private bossSkillGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Sprite;
   private exitSprite!: Phaser.GameObjects.Sprite;
   private autoMoveTarget?: Point;
@@ -216,6 +230,7 @@ export class GameScene extends Phaser.Scene {
     this.fogGraphics = this.add.graphics().setDepth(20);
     this.pointerHintGraphics = this.add.graphics().setDepth(19);
     this.autoTargetGraphics = this.add.graphics().setDepth(19);
+    this.bossSkillGraphics = this.add.graphics().setDepth(18);
     this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
 
     this.bindKeyboard();
@@ -265,9 +280,11 @@ export class GameScene extends Phaser.Scene {
             ? 'dismiss-merchant'
             : (this.artisanOptions
             ? 'dismiss-artisan'
+            : (this.bestiaryRegions
+            ? 'dismiss-bestiary'
             : (this.regionOptions
             ? 'dismiss-region-map'
-            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))))),
+            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding')))))),
         });
       }
     });
@@ -284,10 +301,8 @@ export class GameScene extends Phaser.Scene {
         this.cancelAutoMove();
         return;
       }
-      const enemy = this.enemies.find((candidate) =>
-        candidate.x === target.x &&
-        candidate.y === target.y &&
-        candidate.sprite?.visible !== false,
+      const enemy = this.enemyAtPointer(pointer) ?? this.enemies.find((candidate) =>
+        candidate.x === target.x && candidate.y === target.y && candidate.sprite?.visible !== false,
       );
       this.startAutoMove(target, enemy?.id);
     });
@@ -300,11 +315,19 @@ export class GameScene extends Phaser.Scene {
     };
   }
 
+  private enemyAtPointer(pointer: Phaser.Input.Pointer): Enemy | undefined {
+    return this.enemies.find((enemy) => {
+      const sprite = enemy.sprite;
+      return Boolean(sprite?.visible && sprite.active && sprite.getBounds().contains(pointer.worldX, pointer.worldY));
+    });
+  }
+
   private canUsePointerControls(): boolean {
     if (this.status !== 'town' && this.status !== 'active') return false;
     return !this.discardCandidate &&
       !this.merchantOffers &&
       !this.artisanOptions &&
+      !this.bestiaryRegions &&
       !this.regionOptions &&
       !this.townLoadoutOptions &&
       !this.gildingOptions;
@@ -315,10 +338,8 @@ export class GameScene extends Phaser.Scene {
     if (!this.canUsePointerControls()) return;
     const target = this.pointerTarget(pointer);
     if (!isWalkable(this.dungeon.tiles, target)) return;
-    const enemy = this.enemies.some((candidate) =>
-      candidate.x === target.x &&
-      candidate.y === target.y &&
-      candidate.sprite?.visible !== false,
+    const enemy = Boolean(this.enemyAtPointer(pointer)) || this.enemies.some((candidate) =>
+      candidate.x === target.x && candidate.y === target.y && candidate.sprite?.visible !== false,
     );
     this.pointerHintGraphics
       .lineStyle(2, enemy ? 0xe45f5f : 0xe4c36a, 0.95)
@@ -349,31 +370,48 @@ export class GameScene extends Phaser.Scene {
       this.cancelAutoMove();
       return;
     }
-    const destination = combatTarget
-      ? { x: combatTarget.x, y: combatTarget.y }
-      : this.autoMoveTarget;
+    const destination = combatTarget ? { x: combatTarget.x, y: combatTarget.y } : this.autoMoveTarget;
     if (!combatTarget && destination.x === this.player.x && destination.y === this.player.y) {
       this.cancelAutoMove();
       return;
     }
 
+    if (combatTarget && this.distance(combatTarget, this.player) === 1) {
+      this.attackEnemy(combatTarget);
+      this.finishTurn();
+      if (generation !== this.autoMoveGeneration || !this.canUsePointerControls()) return;
+      const survivingTarget = this.enemies.find((enemy) => enemy.id === this.autoCombatTargetId);
+      if (!survivingTarget) {
+        this.cancelAutoMove();
+        return;
+      }
+      this.renderAutoTarget(survivingTarget, true);
+      this.time.delayedCall(220, () => this.advanceAutoMove(generation));
+      return;
+    }
+
     const blocked = new Set(
       this.enemies
-        .filter((enemy) => enemy.id !== this.autoCombatTargetId)
         .map((enemy) => `${enemy.x},${enemy.y}`),
     );
     if (this.status === 'town') {
-      for (const point of [TOWN_CHEST, TOWN_MERCHANT, TOWN_ARTISAN, this.dungeon.exit]) {
+      for (const point of [TOWN_CHEST, TOWN_MERCHANT, TOWN_ARTISAN, TOWN_ARCHIVIST, this.dungeon.exit]) {
         if (point.x !== destination.x || point.y !== destination.y) blocked.add(`${point.x},${point.y}`);
       }
     }
-    const path = findPath(this.dungeon.tiles, this.player, destination, blocked);
+    const path = combatTarget
+      ? findPathToAdjacent(this.dungeon.tiles, this.player, destination, blocked)
+      : findPath(this.dungeon.tiles, this.player, destination, blocked);
     const next = path[0];
     if (!next) {
       this.cancelAutoMove();
       return;
     }
 
+    if (this.enemies.some((enemy) => enemy.x === next.x && enemy.y === next.y)) {
+      this.time.delayedCall(180, () => this.advanceAutoMove(generation));
+      return;
+    }
     const step = { x: next.x - this.player.x, y: next.y - this.player.y };
     if (this.status === 'town') this.attemptTownMove(step);
     else this.attemptMove(step);
@@ -452,6 +490,12 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.enhancementConfirmation) return;
+    if (command.action === 'dismiss-bestiary') {
+      this.bestiaryRegions = null;
+      this.emitUiState();
+      return;
+    }
+    if (this.bestiaryRegions) return;
     if (command.action === 'dismiss-artisan') {
       this.artisanOptions = null;
       this.artisanSelectedId = null;
@@ -577,6 +621,7 @@ export class GameScene extends Phaser.Scene {
     this.artisanSelectedId = null;
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
+    this.bestiaryRegions = null;
     this.regionOptions = null;
     this.merchantOffers = null;
     this.merchantReveal = null;
@@ -605,6 +650,7 @@ export class GameScene extends Phaser.Scene {
     this.artisanSelectedId = null;
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
+    this.bestiaryRegions = null;
     this.regionOptions = null;
     this.merchantOffers = null;
     this.merchantReveal = null;
@@ -653,12 +699,15 @@ export class GameScene extends Phaser.Scene {
     this.objectGroup?.clear(true, true);
     this.actorGroup?.clear(true, true);
     this.fogGraphics?.clear();
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics?.clear().setAlpha(1);
     this.enemies = [];
     this.chests = [];
     this.altar = undefined;
     this.townChestSprite = undefined;
     this.townMerchantSprite = undefined;
     this.townArtisanSprite = undefined;
+    this.townArchivistSprite = undefined;
     this.gildingOptions = null;
     this.discardCandidate = null;
   }
@@ -741,6 +790,13 @@ export class GameScene extends Phaser.Scene {
       .setDepth(6);
     this.objectGroup.add(this.townArtisanSprite);
 
+    this.townArchivistSprite = this.add
+      .sprite(TOWN_ARCHIVIST.x * TILE_SIZE + 16, TOWN_ARCHIVIST.y * TILE_SIZE + 16, 'tiny-dungeon', 86)
+      .setScale(2.2)
+      .setTint(0x8eb9c5)
+      .setDepth(6);
+    this.objectGroup.add(this.townArchivistSprite);
+
     const gateLabel = this.add
       .text(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 48, '远征地图', {
         fontFamily: 'Microsoft YaHei, sans-serif',
@@ -781,7 +837,17 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(7);
-    this.objectGroup.addMultiple([gateLabel, chestLabel, merchantLabel, artisanLabel]);
+    const archivistLabel = this.add
+      .text(TOWN_ARCHIVIST.x * TILE_SIZE + 16, TOWN_ARCHIVIST.y * TILE_SIZE + 46, '记录官', {
+        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontSize: '12px',
+        color: '#c6e1e8',
+        backgroundColor: '#1c2e33',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(7);
+    this.objectGroup.addMultiple([gateLabel, chestLabel, merchantLabel, artisanLabel, archivistLabel]);
 
     for (const point of [{ x: 7, y: 6 }, { x: 21, y: 6 }, { x: 7, y: 14 }, { x: 21, y: 14 }]) {
       const lantern = this.add
@@ -813,6 +879,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (target.x === TOWN_ARTISAN.x && target.y === TOWN_ARTISAN.y) {
       this.openArtisan();
+      return;
+    }
+    if (target.x === TOWN_ARCHIVIST.x && target.y === TOWN_ARCHIVIST.y) {
+      this.openBestiary();
       return;
     }
     if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
@@ -879,6 +949,7 @@ export class GameScene extends Phaser.Scene {
         scale: theme.boss.scale,
         alerted: true,
         isBoss: true,
+        bossActionCount: 0,
       });
       return;
     }
@@ -887,18 +958,17 @@ export class GameScene extends Phaser.Scene {
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
       const template = theme.enemies[this.random.integer(0, theme.enemies.length - 1)];
-      const scale = 1 + Math.max(0, this.floor - 1) * 0.18;
-      const hp = Math.round(template.hp * scale);
+      const stats = getEnemyStats(template, this.floor);
       this.enemies.push({
         id: `enemy-${this.floor}-${index}`,
         name: template.name,
         x: position.x,
         y: position.y,
-        hp,
-        maxHp: hp,
-        attack: Math.round(template.attack * scale),
-        defense: template.defense + Math.floor(this.floor / 4),
-        reward: template.reward + this.floor,
+        hp: stats.hp,
+        maxHp: stats.hp,
+        attack: stats.attack,
+        defense: stats.defense,
+        reward: stats.reward,
         frame: template.frame,
         tint: template.tint,
         scale: template.scale,
@@ -1142,6 +1212,8 @@ export class GameScene extends Phaser.Scene {
     this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
 
     if (enemy.isBoss) {
+      this.tweens.killTweensOf(this.bossSkillGraphics);
+      this.bossSkillGraphics.clear().setAlpha(1);
       this.bossDefeated = true;
       this.dungeon.exit = { x: enemy.x, y: enemy.y };
       this.exitSprite
@@ -1176,9 +1248,20 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      if (enemy.isBoss && enemy.bossSkillId) {
+        this.resolveBossSkill(enemy);
+        if (this.status === 'dead') return;
+        continue;
+      }
+
       const distance = this.distance(enemy, this.player);
       if (distance === 1) {
+        if (enemy.isBoss && (enemy.bossActionCount ?? 0) >= 2) {
+          this.prepareBossSkill(enemy);
+          continue;
+        }
         this.enemyAttack(enemy);
+        if (enemy.isBoss) enemy.bossActionCount = (enemy.bossActionCount ?? 0) + 1;
         if (this.status === 'dead') return;
         continue;
       }
@@ -1196,10 +1279,19 @@ export class GameScene extends Phaser.Scene {
 
   private enemyAttack(enemy: Enemy): void {
     const damage = Math.max(1, enemy.attack - this.totalDefense + this.random.integer(0, 1));
+    this.damagePlayer(damage, `${enemy.name}对你造成 ${damage} 点伤害。`, 'player');
+  }
+
+  private damagePlayer(
+    damage: number,
+    message: string,
+    type: 'player' | 'boss-skill',
+    label = '',
+  ): void {
     this.player.hp -= damage;
-    this.pushLog(`${enemy.name}对你造成 ${damage} 点伤害。`);
-    this.showDamage(this.player.x, this.player.y, damage, 'player');
-    this.cameras.main.shake(80, 0.0025);
+    this.pushLog(message);
+    this.showDamage(this.player.x, this.player.y, damage, type, label);
+    this.cameras.main.shake(type === 'boss-skill' ? 180 : 80, type === 'boss-skill' ? 0.006 : 0.0025);
     this.playerSprite.setTintFill(0xff746c);
     this.time.delayedCall(80, () => this.playerSprite.clearTint());
 
@@ -1209,6 +1301,117 @@ export class GameScene extends Phaser.Scene {
     this.playerSprite.setTint(0x6e7173).setAngle(90);
     this.pushLog('火把熄灭了。本次收获遗落在洞中。');
     this.emitUiState();
+  }
+
+  private prepareBossSkill(enemy: Enemy): void {
+    const skill = getBossSkill(this.floor);
+    const target = { x: this.player.x, y: this.player.y };
+    const dangerTiles = getBossSkillTiles(skill, target, this.dungeon.tiles);
+    enemy.bossActionCount = 0;
+    enemy.bossSkillId = skill.id;
+    enemy.bossSkillTarget = target;
+    enemy.bossSkillTiles = dangerTiles;
+    this.cancelAutoMove();
+    this.renderBossSkillWarning(skill, dangerTiles);
+    this.pushLog(`${enemy.name}开始蓄力「${skill.name}」，离开高亮危险格！`);
+  }
+
+  private resolveBossSkill(enemy: Enemy): void {
+    const skill = getBossSkillById(enemy.bossSkillId!);
+    const target = enemy.bossSkillTarget ?? { x: this.player.x, y: this.player.y };
+    const dangerTiles = enemy.bossSkillTiles ?? [];
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    this.playBossSkillAnimation(skill, target, dangerTiles);
+    const hit = dangerTiles.some((tile) => tile.x === this.player.x && tile.y === this.player.y);
+    enemy.bossSkillId = undefined;
+    enemy.bossSkillTarget = undefined;
+    enemy.bossSkillTiles = undefined;
+    if (!hit) {
+      this.pushLog(`你避开了「${skill.name}」。`);
+      return;
+    }
+    const damage = getBossSkillDamage(skill, enemy.attack, this.totalDefense);
+    this.damagePlayer(damage, `「${skill.name}」命中，造成 ${damage} 点伤害。`, 'boss-skill', skill.name);
+  }
+
+  private renderBossSkillWarning(skill: BossSkillDefinition, dangerTiles: Point[]): void {
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    for (const tile of dangerTiles) {
+      this.bossSkillGraphics
+        .fillStyle(skill.color, 0.26)
+        .fillRect(tile.x * TILE_SIZE + 2, tile.y * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4)
+        .lineStyle(2, skill.color, 0.95)
+        .strokeRect(tile.x * TILE_SIZE + 3, tile.y * TILE_SIZE + 3, TILE_SIZE - 6, TILE_SIZE - 6);
+    }
+    this.tweens.add({
+      targets: this.bossSkillGraphics,
+      alpha: { from: 0.42, to: 1 },
+      duration: 360,
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private playBossSkillAnimation(skill: BossSkillDefinition, target: Point, dangerTiles: Point[]): void {
+    this.bossSkillGraphics.setAlpha(1);
+    for (const tile of dangerTiles) {
+      this.bossSkillGraphics.fillStyle(skill.color, 0.58)
+        .fillRect(tile.x * TILE_SIZE, tile.y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
+    this.tweens.add({
+      targets: this.bossSkillGraphics,
+      alpha: 0,
+      duration: 520,
+      onComplete: () => this.bossSkillGraphics.clear().setAlpha(1),
+    });
+
+    const centerX = target.x * TILE_SIZE + 16;
+    const centerY = target.y * TILE_SIZE + 16;
+    if (skill.visual === 'lightning') {
+      const bolt = this.add.rectangle(centerX, centerY - 70, 10, 170, skill.color, 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(29);
+      this.tweens.add({ targets: bolt, scaleX: 2.6, alpha: 0, duration: 440, onComplete: () => bolt.destroy() });
+      return;
+    }
+    if (skill.visual === 'fire') {
+      const meteor = this.add.circle(centerX, centerY - 150, 16, skill.color, 1)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(29);
+      this.tweens.add({
+        targets: meteor,
+        y: centerY,
+        scale: 1.7,
+        duration: 260,
+        ease: 'Quad.In',
+        onComplete: () => {
+          this.tweens.add({ targets: meteor, scale: 4, alpha: 0, duration: 320, onComplete: () => meteor.destroy() });
+        },
+      });
+      return;
+    }
+    if (skill.visual === 'quake') {
+      const wave = this.add.ellipse(centerX, centerY, 28, 16, skill.color, 0.7)
+        .setStrokeStyle(3, 0xffdda0, 0.9)
+        .setDepth(29);
+      this.tweens.add({ targets: wave, scaleX: 6, scaleY: 3, alpha: 0, duration: 540, onComplete: () => wave.destroy() });
+      return;
+    }
+    const burst = this.add.rectangle(centerX, centerY, 24, 90, skill.color, 0.78)
+      .setAngle(skill.visual === 'void' ? 45 : 0)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(29);
+    this.tweens.add({
+      targets: burst,
+      scaleX: skill.visual === 'void' ? 3.8 : 2.4,
+      scaleY: skill.visual === 'poison' ? 1.8 : 1.2,
+      angle: skill.visual === 'void' ? 135 : 16,
+      alpha: 0,
+      duration: 620,
+      onComplete: () => burst.destroy(),
+    });
   }
 
   private chooseEnemyStep(enemy: Enemy): Point | undefined {
@@ -1417,6 +1620,12 @@ export class GameScene extends Phaser.Scene {
         starter: false,
       })),
     ];
+    this.emitUiState();
+  }
+
+  private openBestiary(): void {
+    this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.bestiaryRegions = createBestiaryRegions(this.highestUnlockedRegion);
     this.emitUiState();
   }
 
@@ -2145,6 +2354,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private tweenToGrid(sprite: Phaser.GameObjects.Sprite, point: Point): void {
+    this.tweens.killTweensOf(sprite);
     this.tweens.add({
       targets: sprite,
       x: point.x * TILE_SIZE + 16,
@@ -2158,13 +2368,15 @@ export class GameScene extends Phaser.Scene {
     x: number,
     y: number,
     amount: number,
-    type: 'normal' | 'critical' | 'bleed' | 'player',
+    type: 'normal' | 'critical' | 'bleed' | 'player' | 'boss-skill',
+    customLabel = '',
   ): void {
     const styles = {
       normal: { prefix: '', color: '#f6d06f', size: 14, rise: 22, duration: 540, scale: 1 },
       critical: { prefix: '暴击 ', color: '#fff0a1', size: 17, rise: 34, duration: 760, scale: 1.16 },
       bleed: { prefix: '流血 ', color: '#ef6672', size: 13, rise: 28, duration: 680, scale: 1 },
       player: { prefix: '', color: '#ff746c', size: 15, rise: 26, duration: 620, scale: 1.08 },
+      'boss-skill': { prefix: customLabel ? `${customLabel} ` : '技能 ', color: '#ff8f68', size: 16, rise: 34, duration: 820, scale: 1.12 },
     } as const;
     const style = styles[type];
     const horizontalOffset = ((this.combatTextSerial++ % 3) - 1) * 7;
@@ -2241,6 +2453,11 @@ export class GameScene extends Phaser.Scene {
       artisanSelectedId: this.artisanSelectedId,
       enhancementConfirmation: this.enhancementConfirmation ? { ...this.enhancementConfirmation } : null,
       enhancementResult: this.enhancementResult ? { ...this.enhancementResult } : null,
+      bestiaryRegions: this.bestiaryRegions?.map((region) => ({
+        ...region,
+        enemies: region.enemies.map((enemy) => ({ ...enemy })),
+        boss: { ...region.boss },
+      })) ?? null,
       regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
       discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
       activeSetBonus,
@@ -2248,7 +2465,12 @@ export class GameScene extends Phaser.Scene {
       townMaterials: this.townMaterials.map((material) => ({ ...material })),
       merchantOffers: this.merchantOffers?.map((offer) => ({ ...offer })) ?? null,
       merchantReveal: this.merchantReveal ? { ...this.merchantReveal } : null,
-      boss: boss ? { name: boss.name, hp: boss.hp, maxHp: boss.maxHp } : null,
+      boss: boss ? {
+        name: boss.name,
+        hp: boss.hp,
+        maxHp: boss.maxHp,
+        chargingSkill: boss.bossSkillId ? getBossSkillById(boss.bossSkillId).name : undefined,
+      } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));
   }

@@ -10,6 +10,15 @@ export interface StageProgress {
   bossStage: boolean;
 }
 
+export interface EnemyBaseStats {
+  hp: number;
+  attack: number;
+  defense: number;
+  reward: number;
+}
+
+export type EnemyStats = EnemyBaseStats;
+
 export function hasBossAfterFloor(floor: number): boolean {
   return Number.isInteger(floor) && floor > 0 && floor % 10 === 0;
 }
@@ -22,10 +31,21 @@ export function advanceStage(floor: number, bossStage: boolean): StageProgress {
 
 export function getBossStats(floor: number): BossStats {
   return {
-    hp: 45 + floor * 3,
+    hp: 75 + floor * 6,
     attack: 6 + Math.ceil(floor * 0.6),
-    defense: 1 + Math.floor(floor / 5),
+    defense: 3 + Math.floor(floor / 4),
     reward: 40 + floor * 6,
+  };
+}
+
+export function getEnemyStats(base: EnemyBaseStats, floor: number): EnemyStats {
+  const normalized = Math.max(1, Math.floor(floor));
+  const scale = 1 + Math.max(0, normalized - 1) * 0.18;
+  return {
+    hp: Math.round(base.hp * scale),
+    attack: Math.round(base.attack * scale),
+    defense: base.defense + Math.floor(normalized / 4),
+    reward: base.reward + normalized,
   };
 }
 

@@ -11,6 +11,7 @@ import {
 import {
   COMMAND_EVENT,
   UI_EVENT,
+  type BestiaryCreature,
   type Equipment,
   type EquipmentAffix,
   type GameCommand,
@@ -39,7 +40,7 @@ const setBonus = getElement('set-bonus');
 const bagSection = getElement('bag-section');
 const bagCount = getElement('bag-count');
 const bagGrid = getElement('bag-grid');
-const logSection = getElement('log-section');
+const logTitle = getElement('log-title');
 const eventLog = getElement<HTMLOListElement>('event-log');
 const escapeButton = getElement<HTMLButtonElement>('escape-button');
 const returnTownButton = getElement<HTMLButtonElement>('return-town-button');
@@ -55,6 +56,8 @@ const bossEncounter = getElement('boss-encounter');
 const bossName = getElement('boss-name');
 const bossHp = getElement('boss-hp');
 const bossHealthFill = getElement('boss-health-fill');
+const bossSkillWarning = getElement('boss-skill-warning');
+const bossSkillName = getElement('boss-skill-name');
 const gildingModal = getElement('gilding-modal');
 const gildingOptions = getElement('gilding-options');
 const dismissGildingButton = getElement<HTMLButtonElement>('dismiss-gilding-button');
@@ -75,6 +78,9 @@ const enhancementConfirmationItem = getElement('enhancement-confirmation-item');
 const enhancementConfirmationCopy = getElement('enhancement-confirmation-copy');
 const dismissEnhancementConfirmationButton = getElement<HTMLButtonElement>('dismiss-enhancement-confirmation-button');
 const confirmEnhancementButton = getElement<HTMLButtonElement>('confirm-enhancement-button');
+const bestiaryModal = getElement('bestiary-modal');
+const bestiaryRegions = getElement('bestiary-regions');
+const dismissBestiaryButton = getElement<HTMLButtonElement>('dismiss-bestiary-button');
 const regionMapModal = getElement('region-map-modal');
 const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
@@ -94,6 +100,7 @@ const dismissDiscardButton = getElement<HTMLButtonElement>('dismiss-discard-butt
 const confirmDiscardButton = getElement<HTMLButtonElement>('confirm-discard-button');
 let merchantRevealTimer: number | undefined;
 let activeMerchantRevealSequence = 0;
+const TINY_DUNGEON_SHEET = `${import.meta.env.BASE_URL}assets/kenney-tiny-dungeon/Tilemap/tilemap_packed.png`;
 
 function sendCommand(command: GameCommand): void {
   window.dispatchEvent(new CustomEvent<GameCommand>(COMMAND_EVENT, { detail: command }));
@@ -447,6 +454,57 @@ function renderArtisan(state: UiState): void {
   artisanDetail.append(enhanceButton);
 }
 
+function formatStatRange(range: { min: number; max: number }): string {
+  return range.min === range.max ? String(range.min) : `${range.min}～${range.max}`;
+}
+
+function createBestiaryCard(creature: BestiaryCreature): HTMLElement {
+  const card = document.createElement('article');
+  card.className = `bestiary-card${creature.kind === 'boss' ? ' is-boss' : ''}`;
+  const portrait = document.createElement('div');
+  portrait.className = 'bestiary-portrait';
+  const spriteScale = 3;
+  portrait.style.backgroundImage = `url("${TINY_DUNGEON_SHEET}")`;
+  portrait.style.backgroundSize = `${192 * spriteScale}px ${192 * spriteScale}px`;
+  portrait.style.backgroundPosition = `${-(creature.frame % 12) * 16 * spriteScale}px ${-Math.floor(creature.frame / 12) * 16 * spriteScale}px`;
+  portrait.style.borderColor = `#${creature.tint.toString(16).padStart(6, '0')}`;
+
+  const copy = document.createElement('div');
+  copy.className = 'bestiary-card-copy';
+  copy.innerHTML = `
+    <small>${creature.kind === 'boss' ? '区域首领' : '普通怪物'}</small>
+    <strong>${creature.name}</strong>
+    <dl>
+      <div><dt>生命</dt><dd>${formatStatRange(creature.hp)}</dd></div>
+      <div><dt>攻击</dt><dd>${formatStatRange(creature.attack)}</dd></div>
+      <div><dt>防御</dt><dd>${formatStatRange(creature.defense)}</dd></div>
+      <div><dt>古币</dt><dd>${formatStatRange(creature.reward)}</dd></div>
+    </dl>
+    ${creature.skillName ? `<p><b>${creature.skillName}</b><span>${creature.skillDescription}</span></p>` : ''}
+  `;
+  card.append(portrait, copy);
+  return card;
+}
+
+function renderBestiary(state: UiState): void {
+  const regions = state.bestiaryRegions;
+  bestiaryModal.hidden = !regions;
+  bestiaryRegions.replaceChildren();
+  if (!regions) return;
+  for (const region of regions) {
+    const section = document.createElement('section');
+    section.className = 'bestiary-region';
+    const heading = document.createElement('div');
+    heading.className = 'bestiary-region-heading';
+    heading.innerHTML = `<span><small>第 ${region.index + 1} 区域</small><strong>${region.name}</strong></span><b>${region.floorLabel}</b>`;
+    const grid = document.createElement('div');
+    grid.className = 'bestiary-grid';
+    for (const creature of [...region.enemies, region.boss]) grid.append(createBestiaryCard(creature));
+    section.append(heading, grid);
+    bestiaryRegions.append(section);
+  }
+}
+
 function renderRegionMap(state: UiState): void {
   const options = state.regionOptions;
   regionMapModal.hidden = !options;
@@ -561,18 +619,24 @@ function renderState(state: UiState): void {
   }
   bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
   bagSection.hidden = state.inTown;
-  logSection.hidden = state.inTown;
+  logTitle.textContent = state.inTown ? '城镇纪事' : '洞窟回声';
 
   bossEncounter.hidden = !state.boss;
   if (state.boss) {
     bossName.textContent = state.boss.name;
     bossHp.textContent = `${state.boss.hp} / ${state.boss.maxHp}`;
     bossHealthFill.style.width = `${Math.max(0, (state.boss.hp / state.boss.maxHp) * 100)}%`;
+    bossSkillWarning.hidden = !state.boss.chargingSkill;
+    bossSkillName.textContent = state.boss.chargingSkill ? `${state.boss.chargingSkill} · 躲开高亮格` : '';
+  } else {
+    bossSkillWarning.hidden = true;
+    bossSkillName.textContent = '';
   }
 
   renderGilding(state);
   renderTownLoadout(state);
   renderArtisan(state);
+  renderBestiary(state);
   renderRegionMap(state);
   renderMerchant(state);
   renderDiscard(state);
@@ -622,6 +686,7 @@ dismissTownLoadoutButton.addEventListener('click', () => sendCommand({ action: '
 dismissArtisanButton.addEventListener('click', () => sendCommand({ action: 'dismiss-artisan' }));
 dismissEnhancementConfirmationButton.addEventListener('click', () => sendCommand({ action: 'dismiss-enhancement-confirmation' }));
 confirmEnhancementButton.addEventListener('click', () => sendCommand({ action: 'confirm-enhancement' }));
+dismissBestiaryButton.addEventListener('click', () => sendCommand({ action: 'dismiss-bestiary' }));
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));

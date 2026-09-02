@@ -1,4 +1,5 @@
 import type Phaser from 'phaser';
+import type { BossSkillId } from './bossSkills';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
 export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll' | 'material';
@@ -138,6 +139,33 @@ export interface MerchantReveal {
   tier: EquipmentTier;
 }
 
+export interface BestiaryStatRange {
+  min: number;
+  max: number;
+}
+
+export interface BestiaryCreature {
+  name: string;
+  kind: 'enemy' | 'boss';
+  frame: number;
+  tint: number;
+  scale: number;
+  hp: BestiaryStatRange;
+  attack: BestiaryStatRange;
+  defense: BestiaryStatRange;
+  reward: BestiaryStatRange;
+  skillName?: string;
+  skillDescription?: string;
+}
+
+export interface BestiaryRegion {
+  index: number;
+  name: string;
+  floorLabel: string;
+  enemies: BestiaryCreature[];
+  boss: BestiaryCreature;
+}
+
 interface DiscardCandidateBase {
   name: string;
   type: ItemType;
@@ -166,6 +194,10 @@ export interface Enemy {
   isBoss: boolean;
   bleedDamage?: number;
   bleedTurns?: number;
+  bossActionCount?: number;
+  bossSkillId?: BossSkillId;
+  bossSkillTiles?: Array<{ x: number; y: number }>;
+  bossSkillTarget?: { x: number; y: number };
   sprite?: Phaser.GameObjects.Sprite;
 }
 
@@ -204,6 +236,7 @@ export interface UiState {
   artisanSelectedId: string | null;
   enhancementConfirmation: EnhancementConfirmation | null;
   enhancementResult: EnhancementResult | null;
+  bestiaryRegions: BestiaryRegion[] | null;
   regionOptions: RegionOption[] | null;
   discardCandidate: DiscardCandidate | null;
   activeSetBonus: { setName: string; affix: EquipmentAffix } | null;
@@ -215,6 +248,7 @@ export interface UiState {
     name: string;
     hp: number;
     maxHp: number;
+    chargingSkill?: string;
   } | null;
 }
 
@@ -234,6 +268,7 @@ export type GameCommand =
   | { action: 'confirm-enhancement' }
   | { action: 'dismiss-enhancement-confirmation' }
   | { action: 'dismiss-artisan' }
+  | { action: 'dismiss-bestiary' }
   | { action: 'start-region'; regionIndex: number }
   | { action: 'dismiss-region-map' }
   | { action: 'request-discard'; index: number }

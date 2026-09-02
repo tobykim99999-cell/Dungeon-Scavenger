@@ -57,6 +57,10 @@
                 <strong id="boss-hp">0 / 0</strong>
               </div>
               <div class="boss-health-track" aria-hidden="true"><span id="boss-health-fill"></span></div>
+              <div id="boss-skill-warning" class="boss-skill-warning" hidden>
+                <i data-lucide="triangle-alert" aria-hidden="true"></i>
+                <span id="boss-skill-name"></span>
+              </div>
             </div>
             <div id="gilding-modal" class="gilding-modal" hidden role="dialog" aria-modal="true" aria-labelledby="gilding-title">
               <button id="dismiss-gilding-button" class="modal-close" type="button" aria-label="关闭铭金祭台">
@@ -126,6 +130,15 @@
                   </button>
                 </div>
               </div>
+            </div>
+            <div id="bestiary-modal" class="bestiary-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bestiary-title">
+              <button id="dismiss-bestiary-button" class="modal-close" type="button" aria-label="关闭怪物档案">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem bestiary-emblem"><i data-lucide="book-open" aria-hidden="true"></i></div>
+              <p>灰炉镇记录馆</p>
+              <h2 id="bestiary-title">怪物档案</h2>
+              <div id="bestiary-regions" class="bestiary-regions"></div>
             </div>
             <div id="region-map-modal" class="region-map-modal" hidden role="dialog" aria-modal="true" aria-labelledby="region-map-title">
               <button id="dismiss-region-map-button" class="modal-close" type="button" aria-label="关闭远征地图">
@@ -253,7 +266,7 @@
           </section>
 
           <section id="log-section" class="panel-section log-section" aria-live="polite">
-            <div class="section-heading"><h2>洞窟回声</h2></div>
+            <div class="section-heading"><h2 id="log-title">洞窟回声</h2></div>
             <ol id="event-log" class="event-log"></ol>
           </section>
         </aside>

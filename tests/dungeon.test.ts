@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collectWalkableTiles,
   findPath,
+  findPathToAdjacent,
   generateBossArena,
   generateDungeon,
   generateTownMap,
@@ -46,6 +47,15 @@ describe('dungeon generation', () => {
     const detour = findPath(map, { x: 0, y: 1 }, { x: 2, y: 1 }, new Set(['1,1']));
     expect(detour).toHaveLength(4);
     expect(detour.at(-1)).toEqual({ x: 2, y: 1 });
+  });
+
+  it('routes beside an occupied combat target without entering its tile', () => {
+    const map = Array.from({ length: 5 }, () => Array.from({ length: 5 }, () => 1 as const));
+    const target = { x: 3, y: 2 };
+    const route = findPathToAdjacent(map, { x: 0, y: 2 }, target, new Set(['3,2']));
+    const end = route.at(-1)!;
+    expect(Math.abs(end.x - target.x) + Math.abs(end.y - target.y)).toBe(1);
+    expect(route).not.toContainEqual(target);
   });
 
   it('builds the boss stage as one large connected arena', () => {

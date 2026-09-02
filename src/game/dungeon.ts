@@ -246,3 +246,24 @@ export function findPath(
 
   return [];
 }
+
+export function findPathToAdjacent(
+  tiles: Tile[][],
+  start: Point,
+  target: Point,
+  blocked: ReadonlySet<string> = new Set(),
+): Point[] {
+  const candidates = [
+    { x: target.x + 1, y: target.y },
+    { x: target.x - 1, y: target.y },
+    { x: target.x, y: target.y + 1 },
+    { x: target.x, y: target.y - 1 },
+  ].filter((point) => isWalkable(tiles, point) && !blocked.has(`${point.x},${point.y}`));
+
+  let shortest: Point[] = [];
+  for (const candidate of candidates) {
+    const path = findPath(tiles, start, candidate, blocked);
+    if (path.length > 0 && (shortest.length === 0 || path.length < shortest.length)) shortest = path;
+  }
+  return shortest;
+}
