@@ -5,6 +5,7 @@ import {
   generateBossArena,
   generateDungeon,
   generateTownMap,
+  findPath,
   isWalkable,
   MAP_HEIGHT,
   MAP_WIDTH,
@@ -17,11 +18,18 @@ import {
   equipmentAffixBonus,
   equipmentStorageId,
   equipmentTierLabel,
+  getEnhancementBonus,
+  getEnhancementCost,
+  getEnhancementGain,
+  getEnhancementLevel,
+  getEnhancementMaxLevel,
+  getEnhancementSuccessChance,
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
   resolveSetBonus,
   rollBossRewardTiers,
+  rollEnhancementSuccess,
   shouldCriticalHit,
   shouldDropDarkGoldFromChest,
 } from './equipment';
@@ -69,12 +77,15 @@ import {
   INVENTORY_CAPACITY,
   UI_EVENT,
   type Altar,
+  type ArtisanOption,
   type Chest,
   type DiscardCandidate,
   type Enemy,
   type Equipment,
   type EquipmentAffix,
   type EquipmentTier,
+  type EnhancementConfirmation,
+  type EnhancementResult,
   type GameCommand,
   type GildingOption,
   type Item,
@@ -95,6 +106,7 @@ const FOV_RADIUS = 7;
 const ASSET_ROOT = `${import.meta.env.BASE_URL}assets`;
 const TOWN_CHEST = { x: 8, y: 10 };
 const TOWN_MERCHANT = { x: 20, y: 10 };
+const TOWN_ARTISAN = { x: 14, y: 14 };
 
 const PURPLE_SETS: Array<{
   id: string;
@@ -135,6 +147,7 @@ export class GameScene extends Phaser.Scene {
   private altar?: Altar;
   private townChestSprite?: Phaser.GameObjects.Sprite;
   private townMerchantSprite?: Phaser.GameObjects.Sprite;
+  private townArtisanSprite?: Phaser.GameObjects.Sprite;
   private explored = new Set<string>();
   private visible = new Set<string>();
   private bossStage = false;
@@ -147,6 +160,10 @@ export class GameScene extends Phaser.Scene {
   private townMaterials: TownMaterialBalance[] = [];
   private townLoadout: TownLoadoutSelection = {};
   private townLoadoutOptions: TownLoadoutOption[] | null = null;
+  private artisanOptions: ArtisanOption[] | null = null;
+  private artisanSelectedId: string | null = null;
+  private enhancementConfirmation: EnhancementConfirmation | null = null;
+  private enhancementResult: EnhancementResult | null = null;
   private regionOptions: RegionOption[] | null = null;
   private merchantOffers: MerchantOffer[] | null = null;
   private merchantReveal: MerchantReveal | null = null;
@@ -161,8 +178,13 @@ export class GameScene extends Phaser.Scene {
   private objectGroup!: Phaser.GameObjects.Group;
   private actorGroup!: Phaser.GameObjects.Group;
   private fogGraphics!: Phaser.GameObjects.Graphics;
+  private pointerHintGraphics!: Phaser.GameObjects.Graphics;
+  private autoTargetGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Sprite;
   private exitSprite!: Phaser.GameObjects.Sprite;
+  private autoMoveTarget?: Point;
+  private autoCombatTargetId?: string;
+  private autoMoveGeneration = 0;
 
   private readonly commandListener = (event: Event) => {
     this.handleCommand((event as CustomEvent<GameCommand>).detail);
@@ -191,9 +213,12 @@ export class GameScene extends Phaser.Scene {
     this.objectGroup = this.add.group();
     this.actorGroup = this.add.group();
     this.fogGraphics = this.add.graphics().setDepth(20);
+    this.pointerHintGraphics = this.add.graphics().setDepth(19);
+    this.autoTargetGraphics = this.add.graphics().setDepth(19);
     this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
 
     this.bindKeyboard();
+    this.bindPointer();
     window.addEventListener(COMMAND_EVENT, this.commandListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener(COMMAND_EVENT, this.commandListener);
@@ -231,19 +256,165 @@ export class GameScene extends Phaser.Scene {
         this.handleCommand({ action: 'escape' });
       } else if (event.code === 'Escape') {
         this.handleCommand({
-          action: this.discardCandidate
+          action: this.enhancementConfirmation
+            ? 'dismiss-enhancement-confirmation'
+            : (this.discardCandidate
             ? 'dismiss-discard'
             : (this.merchantOffers
             ? 'dismiss-merchant'
+            : (this.artisanOptions
+            ? 'dismiss-artisan'
             : (this.regionOptions
             ? 'dismiss-region-map'
-            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))),
+            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))))),
         });
       }
     });
   }
 
+  private bindPointer(): void {
+    this.input.setDefaultCursor('pointer');
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => this.renderPointerHint(pointer));
+    this.input.on('pointerout', () => this.pointerHintGraphics.clear());
+    this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      if (pointer.button !== 0 || !this.canUsePointerControls()) return;
+      const target = this.pointerTarget(pointer);
+      if (!isWalkable(this.dungeon.tiles, target)) {
+        this.cancelAutoMove();
+        return;
+      }
+      const enemy = this.enemies.find((candidate) =>
+        candidate.x === target.x &&
+        candidate.y === target.y &&
+        candidate.sprite?.visible !== false,
+      );
+      this.startAutoMove(target, enemy?.id);
+    });
+  }
+
+  private pointerTarget(pointer: Phaser.Input.Pointer): Point {
+    return {
+      x: Math.floor(pointer.worldX / TILE_SIZE),
+      y: Math.floor(pointer.worldY / TILE_SIZE),
+    };
+  }
+
+  private canUsePointerControls(): boolean {
+    if (this.status !== 'town' && this.status !== 'active') return false;
+    return !this.discardCandidate &&
+      !this.merchantOffers &&
+      !this.artisanOptions &&
+      !this.regionOptions &&
+      !this.townLoadoutOptions &&
+      !this.gildingOptions;
+  }
+
+  private renderPointerHint(pointer: Phaser.Input.Pointer): void {
+    this.pointerHintGraphics.clear();
+    if (!this.canUsePointerControls()) return;
+    const target = this.pointerTarget(pointer);
+    if (!isWalkable(this.dungeon.tiles, target)) return;
+    const enemy = this.enemies.some((candidate) =>
+      candidate.x === target.x &&
+      candidate.y === target.y &&
+      candidate.sprite?.visible !== false,
+    );
+    this.pointerHintGraphics
+      .lineStyle(2, enemy ? 0xe45f5f : 0xe4c36a, 0.95)
+      .strokeRect(target.x * TILE_SIZE + 2, target.y * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+  }
+
+  private startAutoMove(target: Point, combatTargetId?: string): void {
+    this.cancelAutoMove();
+    if (target.x === this.player.x && target.y === this.player.y && !combatTargetId) return;
+    this.autoMoveTarget = { ...target };
+    this.autoCombatTargetId = combatTargetId;
+    const generation = this.autoMoveGeneration;
+    this.renderAutoTarget(target, Boolean(combatTargetId));
+    this.advanceAutoMove(generation);
+  }
+
+  private advanceAutoMove(generation: number): void {
+    if (generation !== this.autoMoveGeneration) return;
+    if (!this.canUsePointerControls() || !this.autoMoveTarget) {
+      this.cancelAutoMove();
+      return;
+    }
+
+    const combatTarget = this.autoCombatTargetId
+      ? this.enemies.find((enemy) => enemy.id === this.autoCombatTargetId)
+      : undefined;
+    if (this.autoCombatTargetId && !combatTarget) {
+      this.cancelAutoMove();
+      return;
+    }
+    const destination = combatTarget
+      ? { x: combatTarget.x, y: combatTarget.y }
+      : this.autoMoveTarget;
+    if (!combatTarget && destination.x === this.player.x && destination.y === this.player.y) {
+      this.cancelAutoMove();
+      return;
+    }
+
+    const blocked = new Set(
+      this.enemies
+        .filter((enemy) => enemy.id !== this.autoCombatTargetId)
+        .map((enemy) => `${enemy.x},${enemy.y}`),
+    );
+    if (this.status === 'town') {
+      for (const point of [TOWN_CHEST, TOWN_MERCHANT, TOWN_ARTISAN, this.dungeon.exit]) {
+        if (point.x !== destination.x || point.y !== destination.y) blocked.add(`${point.x},${point.y}`);
+      }
+    }
+    const path = findPath(this.dungeon.tiles, this.player, destination, blocked);
+    const next = path[0];
+    if (!next) {
+      this.cancelAutoMove();
+      return;
+    }
+
+    const step = { x: next.x - this.player.x, y: next.y - this.player.y };
+    if (this.status === 'town') this.attemptTownMove(step);
+    else this.attemptMove(step);
+    if (generation !== this.autoMoveGeneration) return;
+    if (!this.canUsePointerControls()) {
+      this.cancelAutoMove();
+      return;
+    }
+
+    const nextCombatTarget = this.autoCombatTargetId
+      ? this.enemies.find((enemy) => enemy.id === this.autoCombatTargetId)
+      : undefined;
+    if (this.autoCombatTargetId && !nextCombatTarget) {
+      this.cancelAutoMove();
+      return;
+    }
+    const nextDestination = nextCombatTarget
+      ? { x: nextCombatTarget.x, y: nextCombatTarget.y }
+      : destination;
+    this.renderAutoTarget(nextDestination, Boolean(nextCombatTarget));
+    this.time.delayedCall(140, () => this.advanceAutoMove(generation));
+  }
+
+  private renderAutoTarget(target: Point, combat: boolean): void {
+    this.autoTargetGraphics
+      .clear()
+      .lineStyle(3, combat ? 0xff6660 : 0xf0cf73, 1)
+      .strokeRect(target.x * TILE_SIZE + 4, target.y * TILE_SIZE + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+  }
+
+  private cancelAutoMove(): void {
+    this.autoMoveGeneration += 1;
+    this.autoMoveTarget = undefined;
+    this.autoCombatTargetId = undefined;
+    this.pointerHintGraphics?.clear();
+    this.autoTargetGraphics?.clear();
+  }
+
   private handleCommand(command: GameCommand): void {
+    if (command.action !== 'mute' && command.action !== 'dismiss-merchant-reveal') {
+      this.cancelAutoMove();
+    }
     if (command.action === 'start') {
       this.enterTown('整备之后，再从矿门出发。');
       return;
@@ -267,6 +438,35 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (this.discardCandidate) return;
+    if (command.action === 'dismiss-enhancement-confirmation') {
+      this.enhancementConfirmation = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'confirm-enhancement') {
+      const targetId = this.enhancementConfirmation?.targetId;
+      this.enhancementConfirmation = null;
+      if (targetId) this.performEnhancement(targetId);
+      else this.emitUiState();
+      return;
+    }
+    if (this.enhancementConfirmation) return;
+    if (command.action === 'dismiss-artisan') {
+      this.artisanOptions = null;
+      this.artisanSelectedId = null;
+      this.enhancementResult = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'select-artisan-equipment') {
+      this.selectArtisanEquipment(command.targetId);
+      return;
+    }
+    if (command.action === 'enhance-equipment') {
+      this.requestEnhancement(command.targetId);
+      return;
+    }
+    if (this.artisanOptions) return;
     if (command.action === 'dismiss-merchant') {
       this.merchantOffers = null;
       this.merchantReveal = null;
@@ -372,6 +572,10 @@ export class GameScene extends Phaser.Scene {
     this.pendingMaterials = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
+    this.artisanOptions = null;
+    this.artisanSelectedId = null;
+    this.enhancementConfirmation = null;
+    this.enhancementResult = null;
     this.regionOptions = null;
     this.merchantOffers = null;
     this.merchantReveal = null;
@@ -396,6 +600,10 @@ export class GameScene extends Phaser.Scene {
     this.pendingMaterials = [];
     this.gildingOptions = null;
     this.townLoadoutOptions = null;
+    this.artisanOptions = null;
+    this.artisanSelectedId = null;
+    this.enhancementConfirmation = null;
+    this.enhancementResult = null;
     this.regionOptions = null;
     this.merchantOffers = null;
     this.merchantReveal = null;
@@ -436,6 +644,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private clearLevel(): void {
+    this.cancelAutoMove();
     for (const chest of this.chests) {
       if (chest.effect) this.tweens.killTweensOf(chest.effect.list);
     }
@@ -448,6 +657,7 @@ export class GameScene extends Phaser.Scene {
     this.altar = undefined;
     this.townChestSprite = undefined;
     this.townMerchantSprite = undefined;
+    this.townArtisanSprite = undefined;
     this.gildingOptions = null;
     this.discardCandidate = null;
   }
@@ -523,6 +733,13 @@ export class GameScene extends Phaser.Scene {
       .setDepth(6);
     this.objectGroup.add(this.townMerchantSprite);
 
+    this.townArtisanSprite = this.add
+      .sprite(TOWN_ARTISAN.x * TILE_SIZE + 16, TOWN_ARTISAN.y * TILE_SIZE + 16, 'tiny-dungeon', 84)
+      .setScale(2.2)
+      .setTint(0xd68b54)
+      .setDepth(6);
+    this.objectGroup.add(this.townArtisanSprite);
+
     const gateLabel = this.add
       .text(this.dungeon.exit.x * TILE_SIZE + 16, this.dungeon.exit.y * TILE_SIZE + 48, '远征地图', {
         fontFamily: 'Microsoft YaHei, sans-serif',
@@ -553,7 +770,17 @@ export class GameScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(7);
-    this.objectGroup.addMultiple([gateLabel, chestLabel, merchantLabel]);
+    const artisanLabel = this.add
+      .text(TOWN_ARTISAN.x * TILE_SIZE + 16, TOWN_ARTISAN.y * TILE_SIZE + 46, '工匠', {
+        fontFamily: 'Microsoft YaHei, sans-serif',
+        fontSize: '12px',
+        color: '#f1c5a0',
+        backgroundColor: '#38251d',
+        padding: { x: 6, y: 3 },
+      })
+      .setOrigin(0.5)
+      .setDepth(7);
+    this.objectGroup.addMultiple([gateLabel, chestLabel, merchantLabel, artisanLabel]);
 
     for (const point of [{ x: 7, y: 6 }, { x: 21, y: 6 }, { x: 7, y: 14 }, { x: 21, y: 14 }]) {
       const lantern = this.add
@@ -581,6 +808,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (target.x === TOWN_MERCHANT.x && target.y === TOWN_MERCHANT.y) {
       this.openMerchant();
+      return;
+    }
+    if (target.x === TOWN_ARTISAN.x && target.y === TOWN_ARTISAN.y) {
+      this.openArtisan();
       return;
     }
     if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
@@ -1122,6 +1353,7 @@ export class GameScene extends Phaser.Scene {
           setId: selectedWeapon.setId,
           setName: selectedWeapon.setName,
           setBonus: selectedWeapon.setBonus ? { ...selectedWeapon.setBonus } : undefined,
+          enhancementLevel: getEnhancementLevel(selectedWeapon),
         }
       : { name: '缺口短剑', power: 2, rarity: 'common', tier: 'common' };
     this.armor = selectedArmor
@@ -1136,6 +1368,7 @@ export class GameScene extends Phaser.Scene {
           setId: selectedArmor.setId,
           setName: selectedArmor.setName,
           setBonus: selectedArmor.setBonus ? { ...selectedArmor.setBonus } : undefined,
+          enhancementLevel: getEnhancementLevel(selectedArmor),
         }
       : { name: '旧皮甲', power: 1, rarity: 'common', tier: 'common' };
   }
@@ -1150,6 +1383,7 @@ export class GameScene extends Phaser.Scene {
         rarity: 'common',
         tier: 'common',
         affixes: [],
+        enhancementLevel: 0,
         equipped: !this.townLoadout.weaponId,
         starter: true,
       },
@@ -1161,6 +1395,7 @@ export class GameScene extends Phaser.Scene {
         rarity: 'common',
         tier: 'common',
         affixes: [],
+        enhancementLevel: 0,
         equipped: !this.townLoadout.armorId,
         starter: true,
       },
@@ -1174,12 +1409,133 @@ export class GameScene extends Phaser.Scene {
         affixes: item.affixes?.map((affix) => ({ ...affix })) ?? [],
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
+        enhancementLevel: getEnhancementLevel(item),
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
         starter: false,
       })),
     ];
+    this.emitUiState();
+  }
+
+  private openArtisan(): void {
+    this.artisanSelectedId = null;
+    this.enhancementConfirmation = null;
+    this.enhancementResult = null;
+    this.refreshArtisanOptions();
+    this.emitUiState();
+  }
+
+  private refreshArtisanOptions(): void {
+    this.artisanOptions = this.vault.flatMap((item) => {
+      const tier = getEquipmentTier(item);
+      const maxLevel = getEnhancementMaxLevel(tier);
+      if (maxLevel === 0) return [];
+      const enhancementLevel = Math.min(getEnhancementLevel(item), maxLevel);
+      const nextCost = getEnhancementCost(tier, enhancementLevel + 1);
+      const gain = getEnhancementGain(item.type, tier);
+      return [{
+        targetId: item.id,
+        name: item.name,
+        type: item.type,
+        tier,
+        power: item.power,
+        enhancementLevel,
+        maxLevel,
+        nextCost,
+        canEnhance: enhancementLevel < maxLevel && this.bankedGold >= nextCost,
+        attackPerLevel: gain.attack,
+        maxHpPerLevel: gain.maxHp,
+        successChance: getEnhancementSuccessChance(tier, enhancementLevel + 1),
+      }];
+    });
+  }
+
+  private selectArtisanEquipment(targetId: string): void {
+    if (this.status !== 'town' || !this.artisanOptions?.some((option) => option.targetId === targetId)) return;
+    this.artisanSelectedId = targetId;
+    this.enhancementResult = null;
+    this.emitUiState();
+  }
+
+  private requestEnhancement(targetId: string): void {
+    if (this.status !== 'town' || !this.artisanOptions?.some((option) => option.targetId === targetId)) return;
+    const equipment = this.vault.find((item) => item.id === targetId);
+    if (!equipment) return;
+    this.artisanSelectedId = targetId;
+    const tier = getEquipmentTier(equipment);
+    const maxLevel = getEnhancementMaxLevel(tier);
+    const level = Math.min(getEnhancementLevel(equipment), maxLevel);
+    if (level >= maxLevel) {
+      this.pushLog(`${equipment.name}已经达到强化上限。`);
+      this.emitUiState();
+      return;
+    }
+    const cost = getEnhancementCost(tier, level + 1);
+    const successChance = getEnhancementSuccessChance(tier, level + 1);
+    if (this.bankedGold < cost) {
+      this.pushLog(`入库古币不足，强化${equipment.name}需要 ${cost} 枚。`);
+      this.emitUiState();
+      return;
+    }
+
+    if (level + 1 > 5) {
+      this.enhancementConfirmation = {
+        targetId,
+        name: equipment.name,
+        nextLevel: level + 1,
+        cost,
+        successChance,
+      };
+      this.emitUiState();
+      return;
+    }
+    this.performEnhancement(targetId);
+  }
+
+  private performEnhancement(targetId: string): void {
+    if (this.status !== 'town' || !this.artisanOptions?.some((option) => option.targetId === targetId)) return;
+    const equipment = this.vault.find((item) => item.id === targetId);
+    if (!equipment) return;
+    const tier = getEquipmentTier(equipment);
+    const maxLevel = getEnhancementMaxLevel(tier);
+    const level = Math.min(getEnhancementLevel(equipment), maxLevel);
+    if (level >= maxLevel) return;
+    const nextLevel = level + 1;
+    const cost = getEnhancementCost(tier, nextLevel);
+    const successChance = getEnhancementSuccessChance(tier, nextLevel);
+    if (this.bankedGold < cost) {
+      this.refreshArtisanOptions();
+      this.emitUiState();
+      return;
+    }
+
+    const previousMaxHp = this.totalMaxHp;
+    this.bankedGold -= cost;
+    localStorage.setItem('abyss-banked-gold', String(this.bankedGold));
+    const success = rollEnhancementSuccess(tier, nextLevel, this.random.next());
+    if (success) {
+      equipment.enhancementLevel = nextLevel;
+      this.persistTownStorage();
+      this.applyTownLoadout();
+      this.adjustHealthForEquipmentChange(previousMaxHp);
+      this.pushLog(`${equipment.name}强化成功，达到 +${nextLevel}。`);
+      this.playSound('equip', 0.5);
+    } else {
+      this.pushLog(`${equipment.name}强化失败，消耗 ${cost} 枚入库古币，装备等级未变化。`);
+      this.playSound('hit', 0.34);
+    }
+    this.refreshArtisanOptions();
+    this.enhancementResult = {
+      success,
+      targetId,
+      name: equipment.name,
+      level: success ? nextLevel : level,
+      message: success
+        ? `强化成功，${equipment.name}达到 +${nextLevel}。`
+        : `强化失败，成功率 ${successChance}%；装备未损坏、未降级。`,
+    };
     this.emitUiState();
   }
 
@@ -1391,6 +1747,7 @@ export class GameScene extends Phaser.Scene {
       setId: item.setId,
       setName: item.setName,
       setBonus: item.setBonus ? { ...item.setBonus } : undefined,
+      enhancementLevel: getEnhancementLevel(item),
     });
   }
 
@@ -1514,6 +1871,7 @@ export class GameScene extends Phaser.Scene {
         setId: item.setId,
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
+        enhancementLevel: getEnhancementLevel(item),
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
@@ -1534,6 +1892,7 @@ export class GameScene extends Phaser.Scene {
         setId: item.setId,
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
+        enhancementLevel: getEnhancementLevel(item),
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
@@ -1748,6 +2107,7 @@ export class GameScene extends Phaser.Scene {
       setId: equipment.setId,
       setName: equipment.setName,
       setBonus: equipment.setBonus ? { ...equipment.setBonus } : undefined,
+      enhancementLevel: getEnhancementLevel(equipment),
     };
   }
 
@@ -1851,6 +2211,10 @@ export class GameScene extends Phaser.Scene {
       gildingOptions: this.gildingOptions?.map((option) => ({ ...option })) ?? null,
       pendingGilded,
       townLoadoutOptions: this.townLoadoutOptions?.map((option) => ({ ...option })) ?? null,
+      artisanOptions: this.artisanOptions?.map((option) => ({ ...option })) ?? null,
+      artisanSelectedId: this.artisanSelectedId,
+      enhancementConfirmation: this.enhancementConfirmation ? { ...this.enhancementConfirmation } : null,
+      enhancementResult: this.enhancementResult ? { ...this.enhancementResult } : null,
       regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
       discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
       activeSetBonus,
@@ -1867,6 +2231,8 @@ export class GameScene extends Phaser.Scene {
     const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
     return this.player.baseAttack +
       this.weapon.power +
+      getEnhancementBonus('weapon', this.weapon).attack +
+      getEnhancementBonus('armor', this.armor).attack +
       equipmentAffixBonus(this.weapon, 'attack') +
       equipmentAffixBonus(this.armor, 'attack') +
       (setBonus?.stat === 'attack' ? setBonus.value : 0);
@@ -1884,6 +2250,8 @@ export class GameScene extends Phaser.Scene {
   private get totalMaxHp(): number {
     const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
     return this.player.maxHp +
+      getEnhancementBonus('weapon', this.weapon).maxHp +
+      getEnhancementBonus('armor', this.armor).maxHp +
       equipmentAffixBonus(this.weapon, 'maxHp') +
       equipmentAffixBonus(this.armor, 'maxHp') +
       (setBonus?.stat === 'maxHp' ? setBonus.value : 0);

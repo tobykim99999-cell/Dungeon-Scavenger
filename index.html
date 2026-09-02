@@ -90,6 +90,43 @@
                 </section>
               </div>
             </div>
+            <div id="artisan-modal" class="artisan-modal" hidden role="dialog" aria-modal="true" aria-labelledby="artisan-title">
+              <button id="dismiss-artisan-button" class="modal-close" type="button" aria-label="关闭工匠铺">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem artisan-emblem"><i data-lucide="hammer" aria-hidden="true"></i></div>
+              <p>灰炉镇锻炉</p>
+              <h2 id="artisan-title">装备强化</h2>
+              <div class="artisan-balance">
+                <i data-lucide="coins" aria-hidden="true"></i>
+                <span>入库古币</span>
+                <strong id="artisan-banked-gold">0</strong>
+              </div>
+              <div class="artisan-workbench">
+                <section class="artisan-equipment-list">
+                  <div class="artisan-section-heading">选择装备</div>
+                  <div id="artisan-options" class="artisan-options"></div>
+                </section>
+                <section class="artisan-enhancement-panel">
+                  <div class="artisan-section-heading">强化详情</div>
+                  <div id="artisan-detail" class="artisan-detail"></div>
+                </section>
+              </div>
+              <div id="enhancement-confirmation" class="enhancement-confirmation" hidden role="alertdialog" aria-modal="true" aria-labelledby="enhancement-confirmation-title">
+                <div class="enhancement-confirmation-emblem"><i data-lucide="triangle-alert" aria-hidden="true"></i></div>
+                <p>高阶强化确认</p>
+                <h3 id="enhancement-confirmation-title">成功率已经降低</h3>
+                <strong id="enhancement-confirmation-item"></strong>
+                <span id="enhancement-confirmation-copy"></span>
+                <div class="enhancement-confirmation-actions">
+                  <button id="dismiss-enhancement-confirmation-button" class="secondary-button" type="button">取消</button>
+                  <button id="confirm-enhancement-button" class="artisan-confirm-button" type="button">
+                    <i data-lucide="hammer" aria-hidden="true"></i>
+                    继续强化
+                  </button>
+                </div>
+              </div>
+            </div>
             <div id="region-map-modal" class="region-map-modal" hidden role="dialog" aria-modal="true" aria-labelledby="region-map-title">
               <button id="dismiss-region-map-button" class="modal-close" type="button" aria-label="关闭远征地图">
                 <i data-lucide="x" aria-hidden="true"></i>

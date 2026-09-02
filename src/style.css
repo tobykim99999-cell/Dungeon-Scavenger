@@ -243,6 +243,7 @@ button:focus-visible {
 
 .gilding-modal[hidden],
 .town-loadout-modal[hidden],
+.artisan-modal[hidden],
 .region-map-modal[hidden],
 .merchant-modal[hidden],
 .discard-modal[hidden] {
@@ -251,6 +252,7 @@ button:focus-visible {
 
 .gilding-modal,
 .town-loadout-modal,
+.artisan-modal,
 .region-map-modal,
 .merchant-modal {
   position: absolute;
@@ -362,6 +364,8 @@ button:focus-visible {
 .gilding-modal > h2,
 .town-loadout-modal > p,
 .town-loadout-modal > h2,
+.artisan-modal > p,
+.artisan-modal > h2,
 .region-map-modal > p,
 .region-map-modal > h2,
 .merchant-modal > p,
@@ -371,6 +375,7 @@ button:focus-visible {
 
 .gilding-modal > p,
 .town-loadout-modal > p,
+.artisan-modal > p,
 .region-map-modal > p,
 .merchant-modal > p {
   color: var(--gold);
@@ -380,6 +385,7 @@ button:focus-visible {
 
 .gilding-modal > h2,
 .town-loadout-modal > h2,
+.artisan-modal > h2,
 .region-map-modal > h2,
 .merchant-modal > h2 {
   margin-top: 5px;
@@ -585,6 +591,414 @@ button:focus-visible {
   gap: 9px;
   margin-top: 18px;
   overflow-y: auto;
+}
+
+.artisan-emblem {
+  color: #e29a62;
+  border-color: #8b5436;
+  background: #2d1e18;
+}
+
+.artisan-balance {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 1px solid #5d4635;
+  color: #c5b29f;
+  background: #211a17;
+  font-size: 9px;
+}
+
+.artisan-balance svg {
+  width: 15px;
+  height: 15px;
+  color: var(--gold);
+}
+
+.artisan-balance strong {
+  color: var(--gold);
+  font-size: 12px;
+}
+
+.artisan-workbench {
+  width: min(760px, 96%);
+  min-height: 300px;
+  max-height: 390px;
+  display: grid;
+  grid-template-columns: minmax(250px, 0.88fr) minmax(300px, 1.12fr);
+  margin-top: 14px;
+  border: 1px solid #4d4036;
+  background: #151817;
+  overflow: hidden;
+}
+
+.artisan-equipment-list,
+.artisan-enhancement-panel {
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+}
+
+.artisan-enhancement-panel {
+  border-left: 1px solid #4d4036;
+}
+
+.artisan-section-heading {
+  margin-bottom: 9px;
+  color: #a99d91;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.artisan-options {
+  width: 100%;
+  max-height: 326px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin: 0;
+  overflow-y: auto;
+}
+
+.artisan-option {
+  width: 100%;
+  min-width: 0;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #5d4d3d;
+  border-radius: 3px;
+  color: var(--text);
+  background: #1d1c19;
+  text-align: left;
+  cursor: pointer;
+}
+
+.artisan-option.tier-dark-gold {
+  border-color: #a86635;
+  background: #2a2119;
+}
+
+.artisan-option.tier-purple {
+  border-color: #895aa8;
+  background: #241c29;
+}
+
+.artisan-option:hover,
+.artisan-option.is-selected {
+  border-color: #dc9561;
+  background: #2b211b;
+}
+
+.artisan-option.is-selected {
+  box-shadow: inset 3px 0 0 #dc9561;
+}
+
+.artisan-option > svg {
+  width: 20px;
+  height: 20px;
+  color: var(--gold);
+}
+
+.artisan-option.tier-dark-gold > svg {
+  color: #e49a53;
+}
+
+.artisan-option.tier-purple > svg {
+  color: #c88ce9;
+}
+
+.artisan-option span,
+.artisan-option small,
+.artisan-option strong,
+.artisan-option em {
+  min-width: 0;
+  display: block;
+}
+
+.artisan-option small {
+  color: #9f9488;
+  font-size: 8px;
+}
+
+.artisan-option strong {
+  margin-top: 3px;
+  font-size: 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.artisan-option em {
+  margin-top: 5px;
+  color: #c9b49f;
+  font-size: 8px;
+  font-style: normal;
+  line-height: 1.35;
+}
+
+.artisan-option > b {
+  color: #df9660;
+  font-size: 11px;
+}
+
+.artisan-empty {
+  grid-column: 1 / -1;
+  min-height: 110px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  border: 1px dashed #4c4841;
+  color: #817d75;
+  font-size: 10px;
+}
+
+.artisan-empty svg {
+  width: 24px;
+  height: 24px;
+}
+
+.artisan-detail {
+  min-height: 245px;
+  display: flex;
+  flex-direction: column;
+}
+
+.artisan-detail-empty {
+  min-height: 245px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  color: #777b76;
+  font-size: 9px;
+  text-align: center;
+}
+
+.artisan-detail-empty svg {
+  width: 26px;
+  height: 26px;
+}
+
+.artisan-detail-title {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.artisan-detail-title > svg {
+  width: 22px;
+  height: 22px;
+  color: var(--gold);
+}
+
+.artisan-detail-title.tier-dark-gold > svg {
+  color: #e49a53;
+}
+
+.artisan-detail-title.tier-purple > svg {
+  color: #c88ce9;
+}
+
+.artisan-detail-title small,
+.artisan-detail-title strong {
+  display: block;
+  min-width: 0;
+}
+
+.artisan-detail-title small {
+  color: #9f9488;
+  font-size: 8px;
+}
+
+.artisan-detail-title strong {
+  margin-top: 3px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.artisan-level-track {
+  display: grid;
+  grid-template-columns: auto minmax(40px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  color: #dd9764;
+  font-size: 10px;
+}
+
+.artisan-level-track i {
+  height: 2px;
+  background: #594333;
+}
+
+.artisan-detail-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 12px 0 0;
+}
+
+.artisan-detail-stats > div {
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #3d403d;
+  background: #1b1e1c;
+}
+
+.artisan-detail-stats dt {
+  color: #848b84;
+  font-size: 8px;
+}
+
+.artisan-detail-stats dd {
+  margin: 4px 0 0;
+  color: #e1dbd0;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.artisan-detail-stats dd.is-danger {
+  color: #ef7870;
+}
+
+.artisan-result {
+  margin-top: 9px;
+  padding: 7px 9px;
+  border: 1px solid #52734b;
+  color: #bdd9b5;
+  background: #1b271b;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.artisan-result.is-failure {
+  border-color: #724449;
+  color: #e1aaa6;
+  background: #2a1d1f;
+}
+
+.artisan-enhance-button {
+  width: 100%;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: auto;
+  border: 1px solid #a6683f;
+  border-radius: 4px;
+  color: #1c120d;
+  background: #df9660;
+  font-size: 9px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.artisan-enhance-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.artisan-enhance-button:disabled {
+  border-color: #3e3c39;
+  color: #70706b;
+  background: #252725;
+  cursor: not-allowed;
+}
+
+.enhancement-confirmation[hidden] {
+  display: none;
+}
+
+.enhancement-confirmation {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  padding: 24px;
+  color: var(--text);
+  text-align: center;
+  background: rgba(8, 10, 10, 0.97);
+}
+
+.enhancement-confirmation-emblem {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #8c544b;
+  color: #ee8377;
+  background: #2c1d1c;
+}
+
+.enhancement-confirmation-emblem svg {
+  width: 22px;
+  height: 22px;
+}
+
+.enhancement-confirmation p,
+.enhancement-confirmation h3 {
+  margin: 0;
+}
+
+.enhancement-confirmation p {
+  margin-top: 12px;
+  color: #e98276;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.enhancement-confirmation h3 {
+  margin-top: 5px;
+  font-size: 19px;
+}
+
+.enhancement-confirmation > strong {
+  margin-top: 14px;
+  color: #f0ddd5;
+  font-size: 12px;
+}
+
+.enhancement-confirmation > span {
+  max-width: 430px;
+  margin-top: 8px;
+  color: #aaa19c;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.enhancement-confirmation-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.artisan-confirm-button {
+  min-width: 120px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #a6683f;
+  border-radius: 4px;
+  color: #1c120d;
+  background: #df9660;
+  cursor: pointer;
+}
+
+.artisan-confirm-button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .merchant-emblem {
@@ -1892,6 +2306,7 @@ footer {
 
   .gilding-modal,
   .town-loadout-modal,
+  .artisan-modal,
   .region-map-modal,
   .merchant-modal,
   .discard-modal {
@@ -1905,6 +2320,20 @@ footer {
     align-content: start;
     padding: 48px 18px 18px;
     overflow-y: auto;
+  }
+
+  .artisan-modal {
+    position: fixed;
+    inset: 8px;
+    z-index: 100;
+    align-content: start;
+    padding: 48px 18px 18px;
+    overflow-y: auto;
+  }
+
+  .artisan-modal .modal-close {
+    top: 10px;
+    right: 10px;
   }
 
   .merchant-modal {
@@ -1934,6 +2363,32 @@ footer {
 
   .town-loadout-options {
     max-height: none;
+    grid-template-columns: 1fr;
+  }
+
+  .artisan-options {
+    width: 100%;
+    max-height: 220px;
+    grid-template-columns: 1fr;
+  }
+
+  .artisan-workbench {
+    width: 100%;
+    max-height: none;
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .artisan-enhancement-panel {
+    border-top: 1px solid #4d4036;
+    border-left: 0;
+  }
+
+  .artisan-detail {
+    min-height: 280px;
+  }
+
+  .artisan-detail-stats {
     grid-template-columns: 1fr;
   }
 

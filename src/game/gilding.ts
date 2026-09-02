@@ -112,6 +112,7 @@ export function parseGildedVault(value: string | null): VaultEquipment[] {
         setId: candidate.setId,
         setName: candidate.setName,
         setBonus: parseAffix(candidate.setBonus),
+        ...parseEnhancementLevel(candidate.enhancementLevel),
       }];
     });
   } catch {
@@ -220,6 +221,7 @@ function parseEquipment(value: unknown): Equipment | undefined {
     setId: candidate.setId,
     setName: candidate.setName,
     setBonus: parseAffix(candidate.setBonus),
+    ...parseEnhancementLevel(candidate.enhancementLevel),
   };
 }
 
@@ -235,6 +237,12 @@ function parseEquipmentTier(value: unknown): NonNullable<Equipment['tier']> {
   return value === 'common' || value === 'gold' || value === 'dark-gold' || value === 'purple'
     ? value
     : 'gold';
+}
+
+function parseEnhancementLevel(value: unknown): Pick<Equipment, 'enhancementLevel'> {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return {};
+  const enhancementLevel = Math.max(0, Math.floor(value));
+  return enhancementLevel > 0 ? { enhancementLevel } : {};
 }
 
 function parseAffix(value: unknown): Equipment['setBonus'] {

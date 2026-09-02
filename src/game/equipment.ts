@@ -8,6 +8,25 @@ import type {
 export const DARK_GOLD_CHEST_CHANCE = 0.1;
 export const BOSS_PURPLE_DROP_CHANCE = 0.6;
 
+export interface EnhancementGain {
+  attack: number;
+  maxHp: number;
+}
+
+const ENHANCEMENT_MAX_LEVEL: Record<EquipmentTier, number> = {
+  common: 0,
+  gold: 7,
+  'dark-gold': 10,
+  purple: 15,
+};
+
+const ENHANCEMENT_COST_BASE: Record<EquipmentTier, number> = {
+  common: 0,
+  gold: 60,
+  'dark-gold': 120,
+  purple: 240,
+};
+
 export function getEquipmentTier(equipment: Pick<Equipment, 'tier' | 'gilded'>): EquipmentTier {
   if (equipment.tier) return equipment.tier;
   return equipment.gilded ? 'gold' : 'common';
@@ -25,6 +44,62 @@ export function equipmentTierLabel(tier: EquipmentTier): string {
 
 export function isCarryableEquipment(equipment: Pick<Equipment, 'tier' | 'gilded'>): boolean {
   return getEquipmentTier(equipment) !== 'common';
+}
+
+export function getEnhancementLevel(
+  equipment: Pick<Equipment, 'enhancementLevel' | 'tier' | 'gilded'>,
+): number {
+  const level = Math.max(0, Math.floor(equipment.enhancementLevel ?? 0));
+  return Math.min(level, getEnhancementMaxLevel(getEquipmentTier(equipment)));
+}
+
+export function getEnhancementMaxLevel(tier: EquipmentTier): number {
+  return ENHANCEMENT_MAX_LEVEL[tier];
+}
+
+export function getEnhancementCost(tier: EquipmentTier, nextLevel: number): number {
+  if (nextLevel < 1 || nextLevel > getEnhancementMaxLevel(tier)) return 0;
+  return ENHANCEMENT_COST_BASE[tier] * nextLevel;
+}
+
+export function getEnhancementGain(
+  type: 'weapon' | 'armor',
+  tier: EquipmentTier,
+): EnhancementGain {
+  if (tier === 'common') return { attack: 0, maxHp: 0 };
+  if (type === 'armor') {
+    return { attack: 0, maxHp: tier === 'gold' ? 1 : tier === 'dark-gold' ? 2 : 3 };
+  }
+  return {
+    attack: 1,
+    maxHp: tier === 'gold' ? 0 : tier === 'dark-gold' ? 1 : 2,
+  };
+}
+
+export function getEnhancementBonus(
+  type: 'weapon' | 'armor',
+  equipment: Equipment,
+): EnhancementGain {
+  const gain = getEnhancementGain(type, getEquipmentTier(equipment));
+  const level = getEnhancementLevel(equipment);
+  return { attack: gain.attack * level, maxHp: gain.maxHp * level };
+}
+
+export function getEnhancementSuccessChance(tier: EquipmentTier, nextLevel: number): number {
+  if (nextLevel < 1 || nextLevel > getEnhancementMaxLevel(tier)) return 0;
+  const base = tier === 'gold' ? 100 : tier === 'dark-gold' ? 95 : tier === 'purple' ? 90 : 0;
+  const earlyPenalty = Math.min(nextLevel - 1, 4) * 5;
+  const advancedPenalty = Math.max(0, Math.min(nextLevel - 5, 5)) * 10;
+  const masteryPenalty = Math.max(0, nextLevel - 10) * 3;
+  return Math.max(5, base - earlyPenalty - advancedPenalty - masteryPenalty);
+}
+
+export function rollEnhancementSuccess(
+  tier: EquipmentTier,
+  nextLevel: number,
+  roll: number,
+): boolean {
+  return roll < getEnhancementSuccessChance(tier, nextLevel) / 100;
 }
 
 export function equipmentAffixBonus(

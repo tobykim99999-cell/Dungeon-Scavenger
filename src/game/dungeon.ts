@@ -199,8 +199,21 @@ export function collectWalkableTiles(dungeon: Dungeon): Point[] {
 }
 
 export function hasPath(tiles: Tile[][], start: Point, target: Point): boolean {
+  return (start.x === target.x && start.y === target.y) || findPath(tiles, start, target).length > 0;
+}
+
+export function findPath(
+  tiles: Tile[][],
+  start: Point,
+  target: Point,
+  blocked: ReadonlySet<string> = new Set(),
+): Point[] {
+  if (!isWalkable(tiles, start) || !isWalkable(tiles, target)) return [];
+  if (start.x === target.x && start.y === target.y) return [];
+
   const queue: Point[] = [{ ...start }];
   const visited = new Set([`${start.x},${start.y}`]);
+  const previous = new Map<string, Point>();
   const directions = [
     { x: 1, y: 0 },
     { x: -1, y: 0 },
@@ -210,17 +223,26 @@ export function hasPath(tiles: Tile[][], start: Point, target: Point): boolean {
 
   for (let index = 0; index < queue.length; index += 1) {
     const current = queue[index];
-    if (current.x === target.x && current.y === target.y) return true;
 
     for (const direction of directions) {
       const next = { x: current.x + direction.x, y: current.y + direction.y };
       const key = `${next.x},${next.y}`;
-      if (!visited.has(key) && isWalkable(tiles, next)) {
+      if (!visited.has(key) && !blocked.has(key) && isWalkable(tiles, next)) {
         visited.add(key);
+        previous.set(key, current);
+        if (next.x === target.x && next.y === target.y) {
+          const path: Point[] = [next];
+          let cursor = current;
+          while (cursor.x !== start.x || cursor.y !== start.y) {
+            path.push(cursor);
+            cursor = previous.get(`${cursor.x},${cursor.y}`)!;
+          }
+          return path.reverse();
+        }
         queue.push(next);
       }
     }
   }
 
-  return false;
+  return [];
 }

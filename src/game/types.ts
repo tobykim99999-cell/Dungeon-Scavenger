@@ -23,6 +23,7 @@ export interface Item {
   setId?: string;
   setName?: string;
   setBonus?: EquipmentAffix;
+  enhancementLevel?: number;
   materialRegion?: number;
 }
 
@@ -37,6 +38,7 @@ export interface Equipment {
   setId?: string;
   setName?: string;
   setBonus?: EquipmentAffix;
+  enhancementLevel?: number;
 }
 
 export interface EquipmentAffix {
@@ -71,8 +73,40 @@ export interface TownLoadoutOption {
   affixes: EquipmentAffix[];
   setName?: string;
   setBonus?: EquipmentAffix;
+  enhancementLevel: number;
   equipped: boolean;
   starter: boolean;
+}
+
+export interface ArtisanOption {
+  targetId: string;
+  name: string;
+  type: 'weapon' | 'armor';
+  tier: EquipmentTier;
+  power: number;
+  enhancementLevel: number;
+  maxLevel: number;
+  nextCost: number;
+  canEnhance: boolean;
+  attackPerLevel: number;
+  maxHpPerLevel: number;
+  successChance: number;
+}
+
+export interface EnhancementConfirmation {
+  targetId: string;
+  name: string;
+  nextLevel: number;
+  cost: number;
+  successChance: number;
+}
+
+export interface EnhancementResult {
+  success: boolean;
+  targetId: string;
+  name: string;
+  level: number;
+  message: string;
 }
 
 export interface RegionOption {
@@ -165,6 +199,10 @@ export interface UiState {
   gildingOptions: GildingOption[] | null;
   pendingGilded: Equipment[];
   townLoadoutOptions: TownLoadoutOption[] | null;
+  artisanOptions: ArtisanOption[] | null;
+  artisanSelectedId: string | null;
+  enhancementConfirmation: EnhancementConfirmation | null;
+  enhancementResult: EnhancementResult | null;
   regionOptions: RegionOption[] | null;
   discardCandidate: DiscardCandidate | null;
   activeSetBonus: { setName: string; affix: EquipmentAffix } | null;
@@ -190,6 +228,11 @@ export type GameCommand =
   | { action: 'dismiss-gilding' }
   | { action: 'equip-town'; targetId: string }
   | { action: 'dismiss-town-loadout' }
+  | { action: 'enhance-equipment'; targetId: string }
+  | { action: 'select-artisan-equipment'; targetId: string }
+  | { action: 'confirm-enhancement' }
+  | { action: 'dismiss-enhancement-confirmation' }
+  | { action: 'dismiss-artisan' }
   | { action: 'start-region'; regionIndex: number }
   | { action: 'dismiss-region-map' }
   | { action: 'request-discard'; index: number }

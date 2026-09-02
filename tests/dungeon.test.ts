@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   collectWalkableTiles,
+  findPath,
   generateBossArena,
   generateDungeon,
   generateTownMap,
@@ -31,6 +32,20 @@ describe('dungeon generation', () => {
 
   it('repeats a map when given the same seed', () => {
     expect(generateDungeon(104729)).toEqual(generateDungeon(104729));
+  });
+
+  it('returns a shortest walkable route and respects dynamic blockers', () => {
+    const tiles = [
+      [1, 1, 1],
+      [1, 1, 1],
+      [1, 1, 1],
+    ] as const;
+    const map = tiles.map((row) => [...row]);
+    const route = findPath(map, { x: 0, y: 1 }, { x: 2, y: 1 });
+    expect(route).toEqual([{ x: 1, y: 1 }, { x: 2, y: 1 }]);
+    const detour = findPath(map, { x: 0, y: 1 }, { x: 2, y: 1 }, new Set(['1,1']));
+    expect(detour).toHaveLength(4);
+    expect(detour.at(-1)).toEqual({ x: 2, y: 1 });
   });
 
   it('builds the boss stage as one large connected arena', () => {

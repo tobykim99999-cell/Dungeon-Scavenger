@@ -3,10 +3,17 @@ import {
   BOSS_PURPLE_DROP_CHANCE,
   equipmentAffixBonus,
   equipmentStorageId,
+  getEnhancementBonus,
+  getEnhancementCost,
+  getEnhancementGain,
+  getEnhancementLevel,
+  getEnhancementMaxLevel,
+  getEnhancementSuccessChance,
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
   rollBossRewardTiers,
+  rollEnhancementSuccess,
   resolveSetBonus,
   shouldCriticalHit,
   shouldDropDarkGoldFromChest,
@@ -52,6 +59,38 @@ describe('equipment tiers', () => {
     expect(isDarkGoldEquipment({ tier: 'gold' })).toBe(false);
     expect(isDarkGoldEquipment({ tier: 'purple' })).toBe(false);
   });
+
+  it('uses the bounded enhancement curve for each equipment tier', () => {
+    expect(getEnhancementMaxLevel('gold')).toBe(7);
+    expect(getEnhancementMaxLevel('dark-gold')).toBe(10);
+    expect(getEnhancementMaxLevel('purple')).toBe(15);
+    expect(getEnhancementLevel({ tier: 'purple', enhancementLevel: 99 })).toBe(15);
+    expect(getEnhancementLevel({ tier: 'gold', enhancementLevel: -3 })).toBe(0);
+    expect(getEnhancementCost('gold', 7)).toBe(420);
+    expect(getEnhancementCost('dark-gold', 10)).toBe(1200);
+    expect(getEnhancementCost('purple', 15)).toBe(3600);
+    expect(getEnhancementCost('purple', 16)).toBe(0);
+  });
+
+  it('puts higher-tier enhancement value into health instead of runaway defense', () => {
+    expect(getEnhancementGain('weapon', 'gold')).toEqual({ attack: 1, maxHp: 0 });
+    expect(getEnhancementGain('weapon', 'purple')).toEqual({ attack: 1, maxHp: 2 });
+    expect(getEnhancementGain('armor', 'gold')).toEqual({ attack: 0, maxHp: 1 });
+    expect(getEnhancementGain('armor', 'purple')).toEqual({ attack: 0, maxHp: 3 });
+    expect(getEnhancementBonus('weapon', { power: 20, name: '守墓誓约', tier: 'purple', enhancementLevel: 15 }))
+      .toEqual({ attack: 15, maxHp: 30 });
+  });
+
+  it('reduces enhancement success by target level and equipment quality', () => {
+    expect([1, 2, 3, 4, 5, 6, 7].map((level) => getEnhancementSuccessChance('gold', level)))
+      .toEqual([100, 95, 90, 85, 80, 70, 60]);
+    expect([1, 5, 6, 10].map((level) => getEnhancementSuccessChance('dark-gold', level)))
+      .toEqual([95, 75, 65, 25]);
+    expect([1, 5, 6, 10, 11, 12, 13, 14, 15].map((level) => getEnhancementSuccessChance('purple', level)))
+      .toEqual([90, 70, 60, 20, 17, 14, 11, 8, 5]);
+    expect(rollEnhancementSuccess('purple', 10, 0.1999)).toBe(true);
+    expect(rollEnhancementSuccess('purple', 10, 0.2)).toBe(false);
+  });
 });
 
 describe('equipment affixes and sets', () => {
@@ -95,5 +134,9 @@ describe('equipment affixes and sets', () => {
       affixes: [{ stat: 'defense' as const, value: 3, label: '远古' }],
     };
     expect(equipmentStorageId('weapon', first)).not.toBe(equipmentStorageId('weapon', second));
+    expect(equipmentStorageId('weapon', first)).toBe(equipmentStorageId('weapon', {
+      ...first,
+      enhancementLevel: 8,
+    }));
   });
 });

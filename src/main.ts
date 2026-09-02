@@ -2,7 +2,12 @@ import Phaser from 'phaser';
 import { createIcons, icons } from 'lucide';
 import './style.css';
 import { GameScene } from './game/GameScene';
-import { equipmentTierLabel, getEquipmentTier } from './game/equipment';
+import {
+  equipmentTierLabel,
+  getEnhancementBonus,
+  getEnhancementLevel,
+  getEquipmentTier,
+} from './game/equipment';
 import {
   COMMAND_EVENT,
   UI_EVENT,
@@ -57,6 +62,16 @@ const dismissTownLoadoutButton = getElement<HTMLButtonElement>('dismiss-town-loa
 const townEquippedSummary = getElement('town-equipped-summary');
 const townStarterActions = getElement('town-starter-actions');
 const townVaultCount = getElement('town-vault-count');
+const artisanModal = getElement('artisan-modal');
+const artisanOptions = getElement('artisan-options');
+const artisanDetail = getElement('artisan-detail');
+const artisanBankedGold = getElement('artisan-banked-gold');
+const dismissArtisanButton = getElement<HTMLButtonElement>('dismiss-artisan-button');
+const enhancementConfirmation = getElement('enhancement-confirmation');
+const enhancementConfirmationItem = getElement('enhancement-confirmation-item');
+const enhancementConfirmationCopy = getElement('enhancement-confirmation-copy');
+const dismissEnhancementConfirmationButton = getElement<HTMLButtonElement>('dismiss-enhancement-confirmation-button');
+const confirmEnhancementButton = getElement<HTMLButtonElement>('confirm-enhancement-button');
 const regionMapModal = getElement('region-map-modal');
 const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
@@ -240,7 +255,7 @@ function renderTownLoadout(state: UiState): void {
     row.className = `warehouse-equipped-row tier-${getEquipmentTier(equipment.value)}${equipment.value.gilded ? ' is-gilded' : ''}`;
     row.innerHTML = `
       <i data-lucide="${equipment.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${equipmentTierLabel(getEquipmentTier(equipment.value))} · ${equipment.label}</small><strong>${equipment.value.name}</strong></span>
+      <span><small>${equipmentTierLabel(getEquipmentTier(equipment.value))} · ${equipment.label} · 强化 +${getEnhancementLevel(equipment.value)}</small><strong>${equipment.value.name}</strong></span>
       <b>+${equipment.value.power}</b>
     `;
     for (const affix of equipment.value.affixes ?? []) {
@@ -281,7 +296,7 @@ function renderTownLoadout(state: UiState): void {
     equipButton.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
       <span>
-        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</small>
+        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'} · 强化 +${option.enhancementLevel}</small>
         <strong>${option.name}</strong>
         ${option.affixes.map((affix) => `<em>${affixText(affix)}</em>`).join('')}
         ${option.setName ? `<em>套装 · ${option.setName}</em>` : ''}
@@ -301,6 +316,91 @@ function renderTownLoadout(state: UiState): void {
     item.append(equipButton, discardButton);
     townLoadoutOptions.append(item);
   }
+}
+
+function renderArtisan(state: UiState): void {
+  const options = state.artisanOptions;
+  artisanModal.hidden = !options;
+  artisanOptions.replaceChildren();
+  artisanDetail.replaceChildren();
+  artisanBankedGold.textContent = String(state.bankedGold);
+  const confirmation = state.enhancementConfirmation;
+  enhancementConfirmation.hidden = !confirmation;
+  if (confirmation) {
+    enhancementConfirmationItem.textContent = `${confirmation.name} · 目标强化 +${confirmation.nextLevel}`;
+    enhancementConfirmationCopy.textContent = `本次成功率 ${confirmation.successChance}%，将消耗 ${confirmation.cost} 枚入库古币。失败会消耗古币，但装备不会损坏或降级。是否继续？`;
+  }
+  if (!options) return;
+
+  if (options.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'artisan-empty';
+    empty.innerHTML = '<i data-lucide="archive" aria-hidden="true"></i><span>仓库中暂无可强化装备</span>';
+    artisanOptions.append(empty);
+    artisanDetail.innerHTML = '<div class="artisan-detail-empty"><i data-lucide="hammer" aria-hidden="true"></i><span>带回金装及以上装备后可以强化</span></div>';
+    return;
+  }
+
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `artisan-option tier-${option.tier}${state.artisanSelectedId === option.targetId ? ' is-selected' : ''}`;
+    button.innerHTML = `
+      <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
+      <span>
+        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</small>
+        <strong>${option.name}</strong>
+        <em>强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
+      </span>
+      <b>+${option.enhancementLevel}</b>
+    `;
+    button.addEventListener('click', () => sendCommand({ action: 'select-artisan-equipment', targetId: option.targetId }));
+    artisanOptions.append(button);
+  }
+
+  const selected = options.find((option) => option.targetId === state.artisanSelectedId);
+  if (!selected) {
+    artisanDetail.innerHTML = '<div class="artisan-detail-empty"><i data-lucide="mouse-pointer-click" aria-hidden="true"></i><span>从左侧选择一件装备</span></div>';
+    return;
+  }
+
+  const atMax = selected.enhancementLevel >= selected.maxLevel;
+  const gains = [
+    selected.attackPerLevel > 0 ? `攻击 +${selected.attackPerLevel}` : '',
+    selected.maxHpPerLevel > 0 ? `生命 +${selected.maxHpPerLevel}` : '',
+  ].filter(Boolean).join(' · ');
+  const totalGains = [
+    selected.attackPerLevel > 0 ? `攻击 +${selected.attackPerLevel * selected.enhancementLevel}` : '',
+    selected.maxHpPerLevel > 0 ? `生命 +${selected.maxHpPerLevel * selected.enhancementLevel}` : '',
+  ].filter(Boolean).join(' · ') || '尚未获得强化属性';
+  artisanDetail.innerHTML = `
+    <div class="artisan-detail-title tier-${selected.tier}">
+      <i data-lucide="${selected.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
+      <span><small>${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}</small><strong>${selected.name}</strong></span>
+    </div>
+    <div class="artisan-level-track"><span>+${selected.enhancementLevel}</span><i></i><b>+${selected.maxLevel}</b></div>
+    <dl class="artisan-detail-stats">
+      <div><dt>每级固定增加</dt><dd>${gains}</dd></div>
+      <div><dt>当前强化收益</dt><dd>${totalGains}</dd></div>
+      <div><dt>下一级成功率</dt><dd class="${selected.successChance < 50 ? 'is-danger' : ''}">${atMax ? '已满级' : `${selected.successChance}%`}</dd></div>
+      <div><dt>本次费用</dt><dd>${atMax ? '—' : `${selected.nextCost} 古币`}</dd></div>
+    </dl>
+  `;
+  if (state.enhancementResult?.targetId === selected.targetId) {
+    const result = document.createElement('div');
+    result.className = `artisan-result ${state.enhancementResult.success ? 'is-success' : 'is-failure'}`;
+    result.textContent = state.enhancementResult.message;
+    artisanDetail.append(result);
+  }
+  const enhanceButton = document.createElement('button');
+  enhanceButton.type = 'button';
+  enhanceButton.className = 'artisan-enhance-button';
+  enhanceButton.disabled = atMax || !selected.canEnhance;
+  enhanceButton.innerHTML = atMax
+    ? '<i data-lucide="badge-check" aria-hidden="true"></i><span>已达到强化上限</span>'
+    : `<i data-lucide="hammer" aria-hidden="true"></i><span>${selected.canEnhance ? `强化到 +${selected.enhancementLevel + 1}` : `还需 ${selected.nextCost} 古币`}</span>`;
+  enhanceButton.addEventListener('click', () => sendCommand({ action: 'enhance-equipment', targetId: selected.targetId }));
+  artisanDetail.append(enhanceButton);
 }
 
 function renderRegionMap(state: UiState): void {
@@ -395,8 +495,12 @@ function renderState(state: UiState): void {
   goldValue.textContent = String(state.gold);
   bankedValue.textContent = String(state.bankedGold);
   combatValue.textContent = `战力 ${state.attack + state.defense}`;
-  weaponValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.weapon))} · ${state.weapon.name} · +${state.weapon.power}`;
-  armorValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.armor))} · ${state.armor.name} · +${state.armor.power}`;
+  const weaponEnhancement = getEnhancementBonus('weapon', state.weapon);
+  const armorEnhancement = getEnhancementBonus('armor', state.armor);
+  const weaponLevel = getEnhancementLevel(state.weapon);
+  const armorLevel = getEnhancementLevel(state.armor);
+  weaponValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.weapon))} · ${state.weapon.name} · +${state.weapon.power + weaponEnhancement.attack}${weaponEnhancement.maxHp > 0 ? ` · 生命 +${weaponEnhancement.maxHp}` : ''}${weaponLevel > 0 ? ` · 强化 +${weaponLevel}` : ''}`;
+  armorValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.armor))} · ${state.armor.name} · +${state.armor.power}${armorEnhancement.maxHp > 0 ? ` · 生命 +${armorEnhancement.maxHp}` : ''}${armorLevel > 0 ? ` · 强化 +${armorLevel}` : ''}`;
   weaponDetail.hidden = !state.weapon.affixes?.length;
   weaponDetail.textContent = state.weapon.affixes?.map(affixText).join('；') ?? '';
   armorDetail.hidden = !state.armor.affixes?.length;
@@ -426,6 +530,7 @@ function renderState(state: UiState): void {
 
   renderGilding(state);
   renderTownLoadout(state);
+  renderArtisan(state);
   renderRegionMap(state);
   renderMerchant(state);
   renderDiscard(state);
@@ -472,6 +577,9 @@ escapeButton.addEventListener('click', () => sendCommand({ action: 'escape' }));
 returnTownButton.addEventListener('click', () => sendCommand({ action: 'return-town' }));
 dismissGildingButton.addEventListener('click', () => sendCommand({ action: 'dismiss-gilding' }));
 dismissTownLoadoutButton.addEventListener('click', () => sendCommand({ action: 'dismiss-town-loadout' }));
+dismissArtisanButton.addEventListener('click', () => sendCommand({ action: 'dismiss-artisan' }));
+dismissEnhancementConfirmationButton.addEventListener('click', () => sendCommand({ action: 'dismiss-enhancement-confirmation' }));
+confirmEnhancementButton.addEventListener('click', () => sendCommand({ action: 'confirm-enhancement' }));
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));

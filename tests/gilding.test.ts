@@ -73,6 +73,18 @@ describe('gilded equipment storage', () => {
     expect(parseGildedVault(JSON.stringify(second.vault))).toEqual(first.vault);
   });
 
+  it('persists a sanitized enhancement level with warehouse equipment', () => {
+    const vault = mergePendingGildedEquipment([], [{
+      type: 'weapon',
+      name: '熔火长剑',
+      power: 14,
+      rarity: 'rare',
+      gilded: true,
+      enhancementLevel: 4,
+    }]).vault;
+    expect(parseGildedVault(JSON.stringify(vault))[0].enhancementLevel).toBe(4);
+  });
+
   it('matches a discarded pending item by type and exact equipment values', () => {
     const equipment = { name: '熔火长剑', power: 14, rarity: 'rare' as const, gilded: true };
     const item = {
