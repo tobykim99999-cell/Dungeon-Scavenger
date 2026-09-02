@@ -84,6 +84,7 @@ import { advanceStage, getBossStats, getChestCount, getEnemyCount, getEnemyStats
 import { getRegionTheme } from './themes';
 import {
   getRegion,
+  getRegionIndex,
   parseRegionProgress,
   REGION_PROGRESS_KEY,
   unlockRegion,
