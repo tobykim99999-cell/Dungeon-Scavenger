@@ -84,6 +84,8 @@ const dismissBestiaryButton = getElement<HTMLButtonElement>('dismiss-bestiary-bu
 const regionMapModal = getElement('region-map-modal');
 const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
+const normalRegionModeButton = getElement<HTMLButtonElement>('normal-region-mode');
+const heroicRegionModeButton = getElement<HTMLButtonElement>('heroic-region-mode');
 const merchantModal = getElement('merchant-modal');
 const merchantOffers = getElement('merchant-offers');
 const dismissMerchantButton = getElement<HTMLButtonElement>('dismiss-merchant-button');
@@ -509,25 +511,34 @@ function renderRegionMap(state: UiState): void {
   const options = state.regionOptions;
   regionMapModal.hidden = !options;
   regionMapOptions.replaceChildren();
+  normalRegionModeButton.classList.toggle('is-selected', state.regionMapMode === 'normal');
+  heroicRegionModeButton.classList.toggle('is-selected', state.regionMapMode === 'heroic');
+  heroicRegionModeButton.disabled = !state.heroicUnlocked;
+  heroicRegionModeButton.title = state.heroicUnlocked ? '英雄远征' : '击败第五区域首领后解锁';
   if (!options) return;
 
   for (const option of options) {
+    const heroic = option.mode === 'heroic';
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'region-map-option';
+    button.className = `region-map-option${heroic ? ' is-heroic' : ''}`;
     button.innerHTML = `
       <span class="map-thumbnail">
-        <i data-lucide="map" aria-hidden="true"></i>
+        <i data-lucide="${heroic ? 'swords' : 'map'}" aria-hidden="true"></i>
         <b>${String(option.index + 1).padStart(2, '0')}</b>
       </span>
       <span class="map-copy">
-        <small>第 ${option.index + 1} 区间</small>
+        <small>${heroic ? '英雄' : '普通'} · 第 ${option.index + 1} 区间</small>
         <strong>${option.name}</strong>
-        <em>${option.startFloor}～${option.endFloor} 层</em>
+        <em>${option.startFloor}～${option.endFloor} 层${heroic ? ` · 威胁 ${option.difficultyStart}～${option.difficultyEnd}` : ''}</em>
       </span>
-      <span class="map-start">第 ${option.startFloor} 层</span>
+      <span class="map-start">${heroic ? '英雄 · ' : ''}第 ${option.startFloor} 层</span>
     `;
-    button.addEventListener('click', () => sendCommand({ action: 'start-region', regionIndex: option.index }));
+    button.addEventListener('click', () => sendCommand({
+      action: 'start-region',
+      regionIndex: option.index,
+      mode: option.mode,
+    }));
     regionMapOptions.append(button);
   }
 }
@@ -688,6 +699,8 @@ dismissEnhancementConfirmationButton.addEventListener('click', () => sendCommand
 confirmEnhancementButton.addEventListener('click', () => sendCommand({ action: 'confirm-enhancement' }));
 dismissBestiaryButton.addEventListener('click', () => sendCommand({ action: 'dismiss-bestiary' }));
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
+normalRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'normal' }));
+heroicRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'heroic' }));
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));
 confirmDiscardButton.addEventListener('click', () => sendCommand({ action: 'confirm-discard' }));

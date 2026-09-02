@@ -2,6 +2,7 @@ import type Phaser from 'phaser';
 import type { BossSkillId } from './bossSkills';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
+export type AdventureMode = 'normal' | 'heroic';
 export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll' | 'material';
 export type Rarity = 'common' | 'uncommon' | 'rare';
 export type EquipmentTier = 'common' | 'gold' | 'dark-gold' | 'purple';
@@ -116,6 +117,9 @@ export interface RegionOption {
   name: string;
   startFloor: number;
   endFloor: number;
+  mode: AdventureMode;
+  difficultyStart: number;
+  difficultyEnd: number;
 }
 
 export interface TownMaterialBalance {
@@ -214,6 +218,7 @@ export interface UiState {
   status: RunStatus;
   floor: number;
   inTown: boolean;
+  adventureMode: AdventureMode;
   areaLabel: string;
   hp: number;
   maxHp: number;
@@ -238,6 +243,8 @@ export interface UiState {
   enhancementResult: EnhancementResult | null;
   bestiaryRegions: BestiaryRegion[] | null;
   regionOptions: RegionOption[] | null;
+  regionMapMode: AdventureMode;
+  heroicUnlocked: boolean;
   discardCandidate: DiscardCandidate | null;
   activeSetBonus: { setName: string; affix: EquipmentAffix } | null;
   pendingMaterials: TownMaterialBalance[];
@@ -269,7 +276,8 @@ export type GameCommand =
   | { action: 'dismiss-enhancement-confirmation' }
   | { action: 'dismiss-artisan' }
   | { action: 'dismiss-bestiary' }
-  | { action: 'start-region'; regionIndex: number }
+  | { action: 'select-region-mode'; mode: AdventureMode }
+  | { action: 'start-region'; regionIndex: number; mode: AdventureMode }
   | { action: 'dismiss-region-map' }
   | { action: 'request-discard'; index: number }
   | { action: 'request-vault-discard'; targetId: string }

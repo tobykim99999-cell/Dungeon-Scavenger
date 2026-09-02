@@ -1544,6 +1544,52 @@ button:focus-visible {
   background: #182528;
 }
 
+.region-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(100px, 1fr));
+  gap: 4px;
+  margin-top: 12px;
+  padding: 3px;
+  border: 1px solid #3e494d;
+  background: #151b1d;
+}
+
+.region-mode-switch button {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 13px;
+  border: 1px solid transparent;
+  color: #78878c;
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.region-mode-switch button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.region-mode-switch button.is-selected {
+  border-color: #52707b;
+  color: #c8e1e6;
+  background: #213036;
+}
+
+.region-mode-switch #heroic-region-mode.is-selected {
+  border-color: #9a5948;
+  color: #f0b07b;
+  background: #33211d;
+}
+
+.region-mode-switch button:disabled {
+  color: #4d5455;
+  cursor: not-allowed;
+}
+
 .region-map-option {
   min-width: 0;
   min-height: 82px;
@@ -1563,6 +1609,27 @@ button:focus-visible {
 .region-map-option:hover {
   border-color: var(--cold);
   background: #202c30;
+}
+
+.region-map-option.is-heroic {
+  border-color: #71483e;
+  background: #261c1a;
+}
+
+.region-map-option.is-heroic:hover {
+  border-color: #c06d50;
+  background: #31211d;
+}
+
+.region-map-option.is-heroic .map-thumbnail {
+  border-color: #8d5543;
+  color: #ef9d6b;
+  background-color: #33221d;
+}
+
+.region-map-option.is-heroic .map-copy small,
+.region-map-option.is-heroic .map-start {
+  color: #e39268;
 }
 
 .map-thumbnail {

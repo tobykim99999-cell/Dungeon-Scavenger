@@ -24,6 +24,14 @@ import {
 } from './bossSkills';
 import { createBestiaryRegions } from './bestiary';
 import {
+  getAdventureDifficultyFloor,
+  getHeroicDifficultyFloor,
+  HEROIC_REGION_COUNT,
+  HEROIC_UNLOCK_KEY,
+  parseHeroicUnlock,
+  shouldUnlockHeroic,
+} from './heroic';
+import {
   equipmentAffixBonus,
   equipmentStorageId,
   equipmentTierLabel,
@@ -46,7 +54,6 @@ import { canStackItems, itemQuantity } from './inventory';
 import { rollMonsterLootType, rollRegularLootType } from './loot';
 import {
   createMerchantOffers,
-  getFloorMaterial,
   getRegionMaterial,
   MATERIAL_VAULT_KEY,
   mergeMaterials,
@@ -85,6 +92,7 @@ import {
   COMMAND_EVENT,
   INVENTORY_CAPACITY,
   UI_EVENT,
+  type AdventureMode,
   type Altar,
   type ArtisanOption,
   type BestiaryRegion,
@@ -145,6 +153,7 @@ export class GameScene extends Phaser.Scene {
   private status: RunStatus = 'waiting';
   private inTown = false;
   private floor = 1;
+  private adventureMode: AdventureMode = 'normal';
   private gold = 0;
   private bankedGold = 0;
   private player: PlayerState = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
@@ -178,6 +187,8 @@ export class GameScene extends Phaser.Scene {
   private enhancementResult: EnhancementResult | null = null;
   private bestiaryRegions: BestiaryRegion[] | null = null;
   private regionOptions: RegionOption[] | null = null;
+  private regionMapMode: AdventureMode = 'normal';
+  private heroicUnlocked = false;
   private merchantOffers: MerchantOffer[] | null = null;
   private merchantReveal: MerchantReveal | null = null;
   private merchantRevealSequence = 0;
@@ -200,6 +211,7 @@ export class GameScene extends Phaser.Scene {
   private autoMoveTarget?: Point;
   private autoCombatTargetId?: string;
   private autoMoveGeneration = 0;
+  private autoMoveHistory: string[] = [];
 
   private readonly commandListener = (event: Event) => {
     this.handleCommand((event as CustomEvent<GameCommand>).detail);
@@ -232,6 +244,7 @@ export class GameScene extends Phaser.Scene {
     this.autoTargetGraphics = this.add.graphics().setDepth(19);
     this.bossSkillGraphics = this.add.graphics().setDepth(18);
     this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
+    this.heroicUnlocked = parseHeroicUnlock(localStorage.getItem(HEROIC_UNLOCK_KEY));
 
     this.bindKeyboard();
     this.bindPointer();
@@ -351,6 +364,7 @@ export class GameScene extends Phaser.Scene {
     if (target.x === this.player.x && target.y === this.player.y && !combatTargetId) return;
     this.autoMoveTarget = { ...target };
     this.autoCombatTargetId = combatTargetId;
+    this.autoMoveHistory = [`${this.player.x},${this.player.y}`];
     const generation = this.autoMoveGeneration;
     this.renderAutoTarget(target, Boolean(combatTargetId));
     this.advanceAutoMove(generation);
@@ -373,6 +387,16 @@ export class GameScene extends Phaser.Scene {
     const destination = combatTarget ? { x: combatTarget.x, y: combatTarget.y } : this.autoMoveTarget;
     if (!combatTarget && destination.x === this.player.x && destination.y === this.player.y) {
       this.cancelAutoMove();
+      return;
+    }
+    if (
+      !combatTarget &&
+      this.status === 'active' &&
+      this.enemies.some((enemy) => this.distance(enemy, this.player) === 1)
+    ) {
+      this.cancelAutoMove();
+      this.pushLog('敌人已经逼近，自动移动已停止。');
+      this.emitUiState();
       return;
     }
 
@@ -409,7 +433,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (this.enemies.some((enemy) => enemy.x === next.x && enemy.y === next.y)) {
-      this.time.delayedCall(180, () => this.advanceAutoMove(generation));
+      this.cancelAutoMove();
       return;
     }
     const step = { x: next.x - this.player.x, y: next.y - this.player.y };
@@ -420,6 +444,18 @@ export class GameScene extends Phaser.Scene {
       this.cancelAutoMove();
       return;
     }
+
+    const positionKey = `${this.player.x},${this.player.y}`;
+    if (this.autoMoveHistory.includes(positionKey)) {
+      this.cancelAutoMove();
+      if (this.status === 'active') {
+        this.pushLog('路线受到怪物干扰，自动移动已停止。');
+        this.emitUiState();
+      }
+      return;
+    }
+    this.autoMoveHistory.push(positionKey);
+    this.autoMoveHistory = this.autoMoveHistory.slice(-8);
 
     const nextCombatTarget = this.autoCombatTargetId
       ? this.enemies.find((enemy) => enemy.id === this.autoCombatTargetId)
@@ -446,6 +482,7 @@ export class GameScene extends Phaser.Scene {
     this.autoMoveGeneration += 1;
     this.autoMoveTarget = undefined;
     this.autoCombatTargetId = undefined;
+    this.autoMoveHistory = [];
     this.pointerHintGraphics?.clear();
     this.autoTargetGraphics?.clear();
   }
@@ -533,8 +570,12 @@ export class GameScene extends Phaser.Scene {
       this.emitUiState();
       return;
     }
+    if (command.action === 'select-region-mode') {
+      this.selectRegionMapMode(command.mode);
+      return;
+    }
     if (command.action === 'start-region') {
-      this.startRegion(command.regionIndex);
+      this.startRegion(command.regionIndex, command.mode);
       return;
     }
     if (this.regionOptions) return;
@@ -602,9 +643,10 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  private resetRun(status: RunStatus, startFloor = 1): void {
+  private resetRun(status: RunStatus, startFloor = 1, mode: AdventureMode = 'normal'): void {
     this.status = status;
     this.inTown = false;
+    this.adventureMode = mode;
     this.floor = startFloor;
     this.bossStage = false;
     this.gold = 0;
@@ -636,6 +678,7 @@ export class GameScene extends Phaser.Scene {
   private enterTown(message: string): void {
     this.status = 'town';
     this.inTown = true;
+    this.adventureMode = 'normal';
     this.floor = 1;
     this.bossStage = false;
     this.bossDefeated = true;
@@ -898,27 +941,54 @@ export class GameScene extends Phaser.Scene {
 
   private openRegionMap(): void {
     this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
-    this.regionOptions = Array.from(
-      { length: this.highestUnlockedRegion + 1 },
-      (_, index) => getRegion(index),
-    );
+    this.heroicUnlocked = parseHeroicUnlock(localStorage.getItem(HEROIC_UNLOCK_KEY));
+    this.regionMapMode = 'normal';
+    this.refreshRegionOptions();
     this.emitUiState();
   }
 
-  private startRegion(regionIndex: number): void {
+  private selectRegionMapMode(mode: AdventureMode): void {
+    if (!this.regionOptions || (mode === 'heroic' && !this.heroicUnlocked)) return;
+    this.regionMapMode = mode;
+    this.refreshRegionOptions();
+    this.emitUiState();
+  }
+
+  private refreshRegionOptions(): void {
+    const count = this.regionMapMode === 'heroic'
+      ? HEROIC_REGION_COUNT
+      : this.highestUnlockedRegion + 1;
+    this.regionOptions = Array.from({ length: count }, (_, index) => {
+      const region = getRegion(index);
+      return {
+        ...region,
+        mode: this.regionMapMode,
+        difficultyStart: this.regionMapMode === 'heroic'
+          ? getHeroicDifficultyFloor(index, 1)
+          : region.startFloor,
+        difficultyEnd: this.regionMapMode === 'heroic'
+          ? getHeroicDifficultyFloor(index, 10)
+          : region.endFloor,
+      };
+    });
+  }
+
+  private startRegion(regionIndex: number, mode: AdventureMode): void {
     if (
       this.status !== 'town' ||
-      !this.regionOptions?.some((option) => option.index === regionIndex) ||
-      regionIndex > this.highestUnlockedRegion
+      !this.regionOptions?.some((option) => option.index === regionIndex && option.mode === mode) ||
+      (mode === 'normal' && regionIndex > this.highestUnlockedRegion) ||
+      (mode === 'heroic' && (!this.heroicUnlocked || regionIndex >= HEROIC_REGION_COUNT))
     ) {
       return;
     }
     const region = getRegion(regionIndex);
     this.regionOptions = null;
-    this.resetRun('active', region.startFloor);
+    this.resetRun('active', region.startFloor, mode);
   }
 
   private unlockRegionAtFloor(floor: number): void {
+    if (this.adventureMode === 'heroic') return;
     this.highestUnlockedRegion = unlockRegion(this.highestUnlockedRegion, floor);
     localStorage.setItem(REGION_PROGRESS_KEY, String(this.highestUnlockedRegion));
   }
@@ -933,7 +1003,7 @@ export class GameScene extends Phaser.Scene {
     this.shuffle(positions);
 
     if (this.bossStage) {
-      const stats = getBossStats(this.floor);
+      const stats = getBossStats(this.difficultyFloor);
       this.enemies.push({
         id: `boss-${this.floor}`,
         name: theme.boss.name,
@@ -954,11 +1024,11 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    const enemyCount = getEnemyCount(this.floor);
+    const enemyCount = getEnemyCount(this.difficultyFloor);
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
       const template = theme.enemies[this.random.integer(0, theme.enemies.length - 1)];
-      const stats = getEnemyStats(template, this.floor);
+      const stats = getEnemyStats(template, this.difficultyFloor);
       this.enemies.push({
         id: `enemy-${this.floor}-${index}`,
         name: template.name,
@@ -1215,12 +1285,18 @@ export class GameScene extends Phaser.Scene {
       this.tweens.killTweensOf(this.bossSkillGraphics);
       this.bossSkillGraphics.clear().setAlpha(1);
       this.bossDefeated = true;
+      if (!this.heroicUnlocked && shouldUnlockHeroic(this.adventureMode, this.floor)) {
+        this.heroicUnlocked = true;
+        localStorage.setItem(HEROIC_UNLOCK_KEY, '1');
+        this.pushLog('第五区域首领已被击败，英雄远征永久解锁。');
+      }
       this.dungeon.exit = { x: enemy.x, y: enemy.y };
       this.exitSprite
         .setPosition(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16)
         .setTint(getRegionTheme(this.floor).exitTint)
         .setVisible(true);
-      const rewardTiers = rollBossRewardTiers(this.floor, this.random.next(), this.random.next());
+      const rewardFloor = this.adventureMode === 'heroic' ? 20 : this.floor;
+      const rewardTiers = rollBossRewardTiers(rewardFloor, this.random.next(), this.random.next());
       const rewardTypes = ['weapon', 'armor'] as const;
       for (let index = 0; index < rewardTypes.length; index += 1) {
         const reward = this.createItem(rewardTypes[index], 'rare', rewardTiers[index]);
@@ -1625,6 +1701,7 @@ export class GameScene extends Phaser.Scene {
 
   private openBestiary(): void {
     this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.heroicUnlocked = parseHeroicUnlock(localStorage.getItem(HEROIC_UNLOCK_KEY));
     this.bestiaryRegions = createBestiaryRegions(this.highestUnlockedRegion);
     this.emitUiState();
   }
@@ -1781,7 +1858,7 @@ export class GameScene extends Phaser.Scene {
     const tier = rollJarEquipmentTier(regionIndex, this.random.next());
     const type = this.random.next() < 0.5 ? 'weapon' : 'armor';
     const region = getRegion(regionIndex);
-    const reward = this.createItem(type, 'rare', tier, region.startFloor + 4);
+    const reward = this.createItem(type, 'rare', tier, region.startFloor + 4, region.index);
     const pending: PendingGildedEquipment = {
       type,
       name: reward.name,
@@ -2198,7 +2275,8 @@ export class GameScene extends Phaser.Scene {
     type: ItemType,
     forcedRarity?: Rarity,
     tier: EquipmentTier = 'common',
-    sourceFloor = this.floor,
+    sourceFloor = this.difficultyFloor,
+    sourceRegionIndex = getRegionIndex(this.floor),
   ): Item {
     const rarityRoll = this.random.next() + Math.min(sourceFloor * 0.025, 0.2);
     const rolledRarity: Rarity = rarityRoll > 0.88 ? 'rare' : rarityRoll > 0.58 ? 'uncommon' : 'common';
@@ -2215,7 +2293,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (type === 'material') {
-      const material = getFloorMaterial(sourceFloor);
+      const material = getRegionMaterial(sourceRegionIndex);
       const quantity = this.random.integer(1, 3);
       return {
         id,
@@ -2431,7 +2509,10 @@ export class GameScene extends Phaser.Scene {
       status: this.status,
       floor: this.floor,
       inTown: this.inTown,
-      areaLabel: this.inTown ? '灰炉镇' : (this.bossStage ? `第 ${this.floor} 层守门大殿` : `第 ${this.floor} 层`),
+      adventureMode: this.adventureMode,
+      areaLabel: this.inTown
+        ? '灰炉镇'
+        : `${this.adventureMode === 'heroic' ? '英雄 · ' : ''}${this.bossStage ? `第 ${this.floor} 层守门大殿` : `第 ${this.floor} 层`}`,
       hp: this.player.hp,
       maxHp: this.totalMaxHp,
       attack: this.totalAttack,
@@ -2459,6 +2540,8 @@ export class GameScene extends Phaser.Scene {
         boss: { ...region.boss },
       })) ?? null,
       regionOptions: this.regionOptions?.map((option) => ({ ...option })) ?? null,
+      regionMapMode: this.regionMapMode,
+      heroicUnlocked: this.heroicUnlocked,
       discardCandidate: this.discardCandidate ? { ...this.discardCandidate } : null,
       activeSetBonus,
       pendingMaterials: this.pendingMaterials.map((material) => ({ ...material })),
@@ -2484,6 +2567,10 @@ export class GameScene extends Phaser.Scene {
       equipmentAffixBonus(this.weapon, 'attack') +
       equipmentAffixBonus(this.armor, 'attack') +
       (setBonus?.stat === 'attack' ? setBonus.value : 0);
+  }
+
+  private get difficultyFloor(): number {
+    return getAdventureDifficultyFloor(this.adventureMode, this.floor);
   }
 
   private get totalDefense(): number {
