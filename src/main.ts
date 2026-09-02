@@ -11,6 +11,7 @@ import {
 import {
   COMMAND_EVENT,
   UI_EVENT,
+  type Equipment,
   type EquipmentAffix,
   type GameCommand,
   type Item,
@@ -35,8 +36,10 @@ const armorValue = getElement('armor-value');
 const weaponDetail = getElement('weapon-detail');
 const armorDetail = getElement('armor-detail');
 const setBonus = getElement('set-bonus');
+const bagSection = getElement('bag-section');
 const bagCount = getElement('bag-count');
 const bagGrid = getElement('bag-grid');
+const logSection = getElement('log-section');
 const eventLog = getElement<HTMLOListElement>('event-log');
 const escapeButton = getElement<HTMLButtonElement>('escape-button');
 const returnTownButton = getElement<HTMLButtonElement>('return-town-button');
@@ -119,6 +122,47 @@ function affixText(affix: EquipmentAffix): string {
     ? ` +${affix.value}%`
     : (affix.stat === 'bleed' ? ` +${affix.value}/回合` : ` +${affix.value}`);
   return `${affix.label} · ${statLabels[affix.stat]}${value}`;
+}
+
+function renderEquipmentValue(
+  element: HTMLElement,
+  equipment: Equipment,
+  type: 'weapon' | 'armor',
+): void {
+  const enhancement = getEnhancementBonus(type, equipment);
+  const enhancementLevel = getEnhancementLevel(equipment);
+  const title = document.createElement('span');
+  title.className = 'equipment-name-line';
+
+  const tier = document.createElement('span');
+  tier.className = 'equipment-tier-label';
+  tier.textContent = equipmentTierLabel(getEquipmentTier(equipment));
+  const name = document.createElement('span');
+  name.className = 'equipment-item-name';
+  name.textContent = equipment.name;
+  title.append(tier, name);
+
+  const stats = document.createElement('span');
+  stats.className = 'equipment-stat-line';
+  const primary = document.createElement('span');
+  primary.className = 'equipment-stat is-primary';
+  primary.innerHTML = `<small>${type === 'weapon' ? '攻击' : '防御'}</small><b>+${equipment.power + enhancement.attack}</b>`;
+  stats.append(primary);
+
+  if (enhancement.maxHp > 0) {
+    const health = document.createElement('span');
+    health.className = 'equipment-stat is-health';
+    health.innerHTML = `<small>生命</small><b>+${enhancement.maxHp}</b>`;
+    stats.append(health);
+  }
+  if (enhancementLevel > 0) {
+    const level = document.createElement('span');
+    level.className = 'equipment-stat is-enhancement';
+    level.innerHTML = `<small>强化</small><b>+${enhancementLevel}</b>`;
+    stats.append(level);
+  }
+
+  element.replaceChildren(title, stats);
 }
 
 function renderInventory(items: Item[], capacity: number): void {
@@ -344,11 +388,11 @@ function renderArtisan(state: UiState): void {
   for (const option of options) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `artisan-option tier-${option.tier}${state.artisanSelectedId === option.targetId ? ' is-selected' : ''}`;
+    button.className = `artisan-option tier-${option.tier}${state.artisanSelectedId === option.targetId ? ' is-selected' : ''}${option.equipped ? ' is-equipped' : ''}`;
     button.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
       <span>
-        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</small>
+        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}${option.equipped ? ' · 已装备' : ''}</small>
         <strong>${option.name}</strong>
         <em>强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
       </span>
@@ -374,9 +418,9 @@ function renderArtisan(state: UiState): void {
     selected.maxHpPerLevel > 0 ? `生命 +${selected.maxHpPerLevel * selected.enhancementLevel}` : '',
   ].filter(Boolean).join(' · ') || '尚未获得强化属性';
   artisanDetail.innerHTML = `
-    <div class="artisan-detail-title tier-${selected.tier}">
+    <div class="artisan-detail-title tier-${selected.tier}${selected.equipped ? ' is-equipped' : ''}">
       <i data-lucide="${selected.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}</small><strong>${selected.name}</strong></span>
+      <span><small>${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}${selected.equipped ? ' · 已装备' : ''}</small><strong>${selected.name}</strong></span>
     </div>
     <div class="artisan-level-track"><span>+${selected.enhancementLevel}</span><i></i><b>+${selected.maxLevel}</b></div>
     <dl class="artisan-detail-stats">
@@ -495,12 +539,8 @@ function renderState(state: UiState): void {
   goldValue.textContent = String(state.gold);
   bankedValue.textContent = String(state.bankedGold);
   combatValue.textContent = `战力 ${state.attack + state.defense}`;
-  const weaponEnhancement = getEnhancementBonus('weapon', state.weapon);
-  const armorEnhancement = getEnhancementBonus('armor', state.armor);
-  const weaponLevel = getEnhancementLevel(state.weapon);
-  const armorLevel = getEnhancementLevel(state.armor);
-  weaponValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.weapon))} · ${state.weapon.name} · +${state.weapon.power + weaponEnhancement.attack}${weaponEnhancement.maxHp > 0 ? ` · 生命 +${weaponEnhancement.maxHp}` : ''}${weaponLevel > 0 ? ` · 强化 +${weaponLevel}` : ''}`;
-  armorValue.textContent = `${equipmentTierLabel(getEquipmentTier(state.armor))} · ${state.armor.name} · +${state.armor.power}${armorEnhancement.maxHp > 0 ? ` · 生命 +${armorEnhancement.maxHp}` : ''}${armorLevel > 0 ? ` · 强化 +${armorLevel}` : ''}`;
+  renderEquipmentValue(weaponValue, state.weapon, 'weapon');
+  renderEquipmentValue(armorValue, state.armor, 'armor');
   weaponDetail.hidden = !state.weapon.affixes?.length;
   weaponDetail.textContent = state.weapon.affixes?.map(affixText).join('；') ?? '';
   armorDetail.hidden = !state.armor.affixes?.length;
@@ -520,6 +560,8 @@ function renderState(state: UiState): void {
     element.classList.add(`tier-${getEquipmentTier(equipment)}`);
   }
   bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
+  bagSection.hidden = state.inTown;
+  logSection.hidden = state.inTown;
 
   bossEncounter.hidden = !state.boss;
   if (state.boss) {

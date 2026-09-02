@@ -173,6 +173,7 @@ export class GameScene extends Phaser.Scene {
   private escapeScrollFloor = 1;
   private random: RandomSource = createRandom(Date.now());
   private itemSerial = 0;
+  private combatTextSerial = 0;
 
   private mapGroup!: Phaser.GameObjects.Group;
   private objectGroup!: Phaser.GameObjects.Group;
@@ -1112,7 +1113,7 @@ export class GameScene extends Phaser.Scene {
     const damage = critical ? baseDamage * 2 : baseDamage;
     enemy.hp -= damage;
     this.playSound('hit', 0.42);
-    this.showDamage(enemy.x, enemy.y, damage, critical ? '#fff1a3' : '#f6d06f');
+    this.showDamage(enemy.x, enemy.y, damage, critical ? 'critical' : 'normal');
     enemy.sprite?.setTintFill(0xf5dfc4);
     this.time.delayedCall(70, () => {
       if (!enemy.sprite?.active) return;
@@ -1167,7 +1168,7 @@ export class GameScene extends Phaser.Scene {
         const bleedDamage = enemy.bleedDamage!;
         enemy.hp -= bleedDamage;
         enemy.bleedTurns = Math.max(0, enemy.bleedTurns! - 1);
-        this.showDamage(enemy.x, enemy.y, bleedDamage, '#e45f6c');
+        this.showDamage(enemy.x, enemy.y, bleedDamage, 'bleed');
         this.pushLog(`${enemy.name}受到 ${bleedDamage} 点流血伤害。`);
         if (enemy.hp <= 0) {
           this.defeatEnemy(enemy);
@@ -1197,7 +1198,7 @@ export class GameScene extends Phaser.Scene {
     const damage = Math.max(1, enemy.attack - this.totalDefense + this.random.integer(0, 1));
     this.player.hp -= damage;
     this.pushLog(`${enemy.name}对你造成 ${damage} 点伤害。`);
-    this.showDamage(this.player.x, this.player.y, damage, '#ff746c');
+    this.showDamage(this.player.x, this.player.y, damage, 'player');
     this.cameras.main.shake(80, 0.0025);
     this.playerSprite.setTintFill(0xff746c);
     this.time.delayedCall(80, () => this.playerSprite.clearTint());
@@ -1448,6 +1449,9 @@ export class GameScene extends Phaser.Scene {
         attackPerLevel: gain.attack,
         maxHpPerLevel: gain.maxHp,
         successChance: getEnhancementSuccessChance(tier, enhancementLevel + 1),
+        equipped: item.type === 'weapon'
+          ? this.townLoadout.weaponId === item.id
+          : this.townLoadout.armorId === item.id,
       }];
     });
   }
@@ -2150,19 +2154,41 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  private showDamage(x: number, y: number, amount: number, color: string): void {
+  private showDamage(
+    x: number,
+    y: number,
+    amount: number,
+    type: 'normal' | 'critical' | 'bleed' | 'player',
+  ): void {
+    const styles = {
+      normal: { prefix: '', color: '#f6d06f', size: 14, rise: 22, duration: 540, scale: 1 },
+      critical: { prefix: '暴击 ', color: '#fff0a1', size: 17, rise: 34, duration: 760, scale: 1.16 },
+      bleed: { prefix: '流血 ', color: '#ef6672', size: 13, rise: 28, duration: 680, scale: 1 },
+      player: { prefix: '', color: '#ff746c', size: 15, rise: 26, duration: 620, scale: 1.08 },
+    } as const;
+    const style = styles[type];
+    const horizontalOffset = ((this.combatTextSerial++ % 3) - 1) * 7;
     const label = this.add
-      .text(x * TILE_SIZE + 16, y * TILE_SIZE + 2, `-${amount}`, {
-        fontFamily: 'Arial, sans-serif',
-        fontSize: '14px',
+      .text(x * TILE_SIZE + 16 + horizontalOffset, y * TILE_SIZE + 2, `${style.prefix}-${amount}`, {
+        fontFamily: 'Bahnschrift, Microsoft YaHei, sans-serif',
+        fontSize: `${style.size}px`,
         fontStyle: 'bold',
-        color,
+        color: style.color,
         stroke: '#080a0b',
         strokeThickness: 3,
       })
       .setOrigin(0.5)
+      .setScale(style.scale)
       .setDepth(30);
-    this.tweens.add({ targets: label, y: label.y - 22, alpha: 0, duration: 520, onComplete: () => label.destroy() });
+    this.tweens.add({
+      targets: label,
+      y: label.y - style.rise,
+      alpha: 0,
+      scale: style.scale * 0.92,
+      duration: style.duration,
+      ease: 'Cubic.Out',
+      onComplete: () => label.destroy(),
+    });
   }
 
   private pushLog(message: string): void {

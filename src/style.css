@@ -699,6 +699,16 @@ button:focus-visible {
   box-shadow: inset 3px 0 0 #dc9561;
 }
 
+.artisan-option.is-equipped:not(.is-selected) {
+  border-color: #768b58;
+  box-shadow: inset 3px 0 0 #8fac62;
+}
+
+.artisan-option.is-equipped small,
+.artisan-detail-title.is-equipped small {
+  color: #b4c88d;
+}
+
 .artisan-option > svg {
   width: 20px;
   height: 20px;
@@ -1803,9 +1813,13 @@ button:focus-visible {
 .equipment-row {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   gap: 10px;
-  min-height: 48px;
+  min-height: 66px;
+}
+
+.equipment-row > div:last-child {
+  min-width: 0;
 }
 
 .equipment-row + .equipment-row {
@@ -1818,7 +1832,7 @@ button:focus-visible {
   background: #282318;
 }
 
-.equipment-row.is-gilded strong {
+.equipment-row.is-gilded .equipment-item-name {
   color: #f0dba7;
 }
 
@@ -1881,23 +1895,113 @@ button:focus-visible {
   color: var(--cold);
 }
 
-.equipment-row span,
-.equipment-row strong {
+.equipment-row > div:last-child > span,
+.equipment-row > div:last-child > strong {
   display: block;
 }
 
-.equipment-row span {
+.equipment-row > div:last-child > span {
   margin-bottom: 3px;
   color: var(--muted);
   font-size: 10px;
 }
 
-.equipment-row strong {
-  overflow: hidden;
+.equipment-row > div:last-child > strong {
   color: var(--text);
   font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.equipment-value {
+  min-width: 0;
+}
+
+.equipment-name-line {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin: 0;
+}
+
+.equipment-tier-label {
+  flex: 0 0 auto;
+  color: #9ca4a1;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.equipment-item-name {
+  min-width: 0;
+  color: #edf0eb;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.equipment-row.tier-dark-gold .equipment-tier-label,
+.equipment-row.tier-dark-gold .equipment-item-name {
+  color: #f0ad63;
+}
+
+.equipment-row.tier-purple .equipment-tier-label,
+.equipment-row.tier-purple .equipment-item-name {
+  color: #d7a8ef;
+}
+
+.equipment-stat-line {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 6px;
+}
+
+.equipment-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding-left: 7px;
+  border-left: 1px solid #46504c;
+}
+
+.equipment-stat small {
+  color: #858f8b;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.equipment-stat b {
+  color: #dde4df;
+  font-family: Bahnschrift, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.equipment-stat.is-primary {
+  border-left-color: #9a7441;
+}
+
+.equipment-stat.is-primary b {
+  color: #efc56f;
+}
+
+.equipment-stat.is-health {
+  border-left-color: #87504f;
+}
+
+.equipment-stat.is-health b {
+  color: #e68b84;
+}
+
+.equipment-stat.is-enhancement {
+  border-left-color: #587485;
+}
+
+.equipment-stat.is-enhancement b {
+  color: #91bfd5;
 }
 
 .bag-grid {

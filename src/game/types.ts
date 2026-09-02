@@ -91,6 +91,7 @@ export interface ArtisanOption {
   attackPerLevel: number;
   maxHpPerLevel: number;
   successChance: number;
+  equipped: boolean;
 }
 
 export interface EnhancementConfirmation {
