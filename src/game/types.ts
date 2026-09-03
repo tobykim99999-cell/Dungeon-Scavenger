@@ -93,6 +93,7 @@ export interface ArtisanOption {
   nextCost: number;
   canEnhance: boolean;
   attackPerLevel: number;
+  defensePerLevel: number;
   maxHpPerLevel: number;
   successChance: number;
   equipped: boolean;

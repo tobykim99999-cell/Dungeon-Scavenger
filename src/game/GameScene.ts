@@ -224,10 +224,14 @@ export class GameScene extends Phaser.Scene {
   private autoCombatTargetId?: string;
   private autoMoveGeneration = 0;
   private autoMoveHistory: string[] = [];
+  private heldMoveKey?: string;
+  private heldMoveDelay?: Phaser.Time.TimerEvent;
+  private heldMoveRepeat?: Phaser.Time.TimerEvent;
 
   private readonly commandListener = (event: Event) => {
     this.handleCommand((event as CustomEvent<GameCommand>).detail);
   };
+  private readonly blurListener = () => this.stopHeldMovement();
 
   constructor() {
     super('GameScene');
@@ -261,33 +265,38 @@ export class GameScene extends Phaser.Scene {
     this.bindKeyboard();
     this.bindPointer();
     window.addEventListener(COMMAND_EVENT, this.commandListener);
+    window.addEventListener('blur', this.blurListener);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener(COMMAND_EVENT, this.commandListener);
+      window.removeEventListener('blur', this.blurListener);
+      this.stopHeldMovement();
     });
 
     this.enterTown('远征者回到了灰炉镇。');
   }
 
   private bindKeyboard(): void {
-    this.input.keyboard?.on('keydown', (event: KeyboardEvent) => {
-      if (event.repeat) return;
-
-      const movement: Record<string, MoveDirection> = {
-        ArrowUp: 'up',
-        KeyW: 'up',
-        ArrowDown: 'down',
-        KeyS: 'down',
-        ArrowLeft: 'left',
-        KeyA: 'left',
-        ArrowRight: 'right',
-        KeyD: 'right',
-      };
+    const keyboard = this.input.keyboard;
+    if (!keyboard) return;
+    const movement: Record<string, MoveDirection> = {
+      ArrowUp: 'up',
+      KeyW: 'up',
+      ArrowDown: 'down',
+      KeyS: 'down',
+      ArrowLeft: 'left',
+      KeyA: 'left',
+      ArrowRight: 'right',
+      KeyD: 'right',
+    };
+    keyboard.on('keydown', (event: KeyboardEvent) => {
       const direction = movement[event.code];
       if (direction) {
         event.preventDefault();
-        this.handleCommand({ action: 'move', direction });
+        if (!event.repeat && this.canUsePointerControls()) this.startHeldMovement(event.code, direction);
         return;
       }
+
+      if (event.repeat) return;
 
       if (/^Digit[1-9]$/.test(event.code)) {
         this.handleCommand({ action: 'use-item', index: Number(event.code.slice(-1)) - 1 });
@@ -313,6 +322,41 @@ export class GameScene extends Phaser.Scene {
         });
       }
     });
+    keyboard.on('keyup', (event: KeyboardEvent) => {
+      if (event.code === this.heldMoveKey) this.stopHeldMovement();
+    });
+  }
+
+  private startHeldMovement(key: string, direction: MoveDirection): void {
+    this.stopHeldMovement();
+    this.heldMoveKey = key;
+    this.handleCommand({ action: 'move', direction });
+    this.heldMoveDelay = this.time.delayedCall(240, () => {
+      if (this.heldMoveKey !== key || !this.canUsePointerControls()) {
+        this.stopHeldMovement();
+        return;
+      }
+      this.handleCommand({ action: 'move', direction });
+      this.heldMoveRepeat = this.time.addEvent({
+        delay: 140,
+        loop: true,
+        callback: () => {
+          if (this.heldMoveKey !== key || !this.canUsePointerControls()) {
+            this.stopHeldMovement();
+            return;
+          }
+          this.handleCommand({ action: 'move', direction });
+        },
+      });
+    });
+  }
+
+  private stopHeldMovement(): void {
+    this.heldMoveDelay?.remove(false);
+    this.heldMoveRepeat?.remove(false);
+    this.heldMoveDelay = undefined;
+    this.heldMoveRepeat = undefined;
+    this.heldMoveKey = undefined;
   }
 
   private bindPointer(): void {
@@ -747,6 +791,7 @@ export class GameScene extends Phaser.Scene {
 
   private clearLevel(): void {
     this.cancelAutoMove();
+    this.stopHeldMovement();
     for (const chest of this.chests) {
       if (chest.effect) this.tweens.killTweensOf(chest.effect.list);
     }
@@ -1406,6 +1451,7 @@ export class GameScene extends Phaser.Scene {
     enemy.bossSkillTarget = target;
     enemy.bossSkillTiles = dangerTiles;
     this.cancelAutoMove();
+    this.stopHeldMovement();
     this.renderBossSkillWarning(skill, dangerTiles);
     this.pushLog(`${enemy.name}开始蓄力「${skill.name}」，离开高亮危险格！`);
   }
@@ -1765,6 +1811,7 @@ export class GameScene extends Phaser.Scene {
         nextCost,
         canEnhance: enhancementLevel < maxLevel && this.bankedGold >= nextCost,
         attackPerLevel: gain.attack,
+        defensePerLevel: gain.defense,
         maxHpPerLevel: gain.maxHp,
         successChance: getEnhancementSuccessChance(tier, enhancementLevel + 1),
         score: getEquipmentScore(item.type, item),
@@ -2631,6 +2678,8 @@ export class GameScene extends Phaser.Scene {
     const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
     return this.player.baseDefense +
       this.armor.power +
+      getEnhancementBonus('weapon', this.weapon).defense +
+      getEnhancementBonus('armor', this.armor).defense +
       equipmentAffixBonus(this.weapon, 'defense') +
       equipmentAffixBonus(this.armor, 'defense') +
       (setBonus?.stat === 'defense' ? setBonus.value : 0);

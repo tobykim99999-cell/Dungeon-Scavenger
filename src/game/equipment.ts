@@ -10,6 +10,7 @@ export const BOSS_PURPLE_DROP_CHANCE = 0.6;
 
 export interface EnhancementGain {
   attack: number;
+  defense: number;
   maxHp: number;
 }
 
@@ -66,13 +67,18 @@ export function getEnhancementGain(
   type: 'weapon' | 'armor',
   tier: EquipmentTier,
 ): EnhancementGain {
-  if (tier === 'common') return { attack: 0, maxHp: 0 };
+  if (tier === 'common') return { attack: 0, defense: 0, maxHp: 0 };
   if (type === 'armor') {
-    return { attack: 0, maxHp: tier === 'gold' ? 1 : tier === 'dark-gold' ? 2 : 3 };
+    return {
+      attack: 0,
+      defense: 1,
+      maxHp: tier === 'gold' ? 1 : tier === 'dark-gold' ? 2 : 3,
+    };
   }
   return {
-    attack: 1,
-    maxHp: tier === 'gold' ? 0 : tier === 'dark-gold' ? 1 : 2,
+    attack: tier === 'gold' ? 1 : 2,
+    defense: 0,
+    maxHp: 0,
   };
 }
 
@@ -82,7 +88,11 @@ export function getEnhancementBonus(
 ): EnhancementGain {
   const gain = getEnhancementGain(type, getEquipmentTier(equipment));
   const level = getEnhancementLevel(equipment);
-  return { attack: gain.attack * level, maxHp: gain.maxHp * level };
+  return {
+    attack: gain.attack * level,
+    defense: gain.defense * level,
+    maxHp: gain.maxHp * level,
+  };
 }
 
 function equipmentAffixScore(affix: EquipmentAffix): number {
@@ -94,7 +104,7 @@ function equipmentAffixScore(affix: EquipmentAffix): number {
 
 export function getEquipmentScore(type: 'weapon' | 'armor', equipment: Equipment): number {
   const enhancement = getEnhancementBonus(type, equipment);
-  const primaryPower = equipment.power + (type === 'weapon' ? enhancement.attack : 0);
+  const primaryPower = equipment.power + (type === 'weapon' ? enhancement.attack : enhancement.defense);
   const affixScore = (equipment.affixes ?? []).reduce(
     (total, affix) => total + equipmentAffixScore(affix),
     0,

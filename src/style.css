@@ -2105,6 +2105,7 @@ button:focus-visible {
 }
 
 .equipment-row {
+  position: relative;
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
   align-items: start;
@@ -2114,6 +2115,7 @@ button:focus-visible {
 
 .equipment-row > div:last-child {
   min-width: 0;
+  padding-right: 70px;
 }
 
 .equipment-row + .equipment-row {
@@ -2696,8 +2698,11 @@ button:focus-visible {
 }
 
 .slot-equipment-score {
-  grid-column: 2;
-  align-self: start;
+  position: absolute;
+  top: 6px;
+  right: 31px;
+  z-index: 1;
+  margin: 0;
 }
 
 .bag-slot .slot-equipment-score svg {
@@ -2718,6 +2723,13 @@ button:focus-visible {
 
 .equipment-value > span:last-child {
   margin-top: 2px;
+}
+
+.current-equipment-score {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin: 0;
 }
 
 .warehouse-equipped-row {

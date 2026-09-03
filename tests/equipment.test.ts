@@ -77,7 +77,7 @@ describe('equipment tiers', () => {
       tier: 'dark-gold',
       enhancementLevel: 8,
       affixes: [{ stat: 'defense', value: 3, label: '坚韧' }],
-    })).toBe(137);
+    })).toBe(157);
     expect(getEquipmentScore('armor', {
       name: '深渊回响',
       power: 21,
@@ -99,13 +99,15 @@ describe('equipment tiers', () => {
     expect(getEnhancementCost('purple', 16)).toBe(0);
   });
 
-  it('puts higher-tier enhancement value into health instead of runaway defense', () => {
-    expect(getEnhancementGain('weapon', 'gold')).toEqual({ attack: 1, maxHp: 0 });
-    expect(getEnhancementGain('weapon', 'purple')).toEqual({ attack: 1, maxHp: 2 });
-    expect(getEnhancementGain('armor', 'gold')).toEqual({ attack: 0, maxHp: 1 });
-    expect(getEnhancementGain('armor', 'purple')).toEqual({ attack: 0, maxHp: 3 });
+  it('gives premium weapons more attack and armor both defense and health', () => {
+    expect(getEnhancementGain('weapon', 'gold')).toEqual({ attack: 1, defense: 0, maxHp: 0 });
+    expect(getEnhancementGain('weapon', 'dark-gold')).toEqual({ attack: 2, defense: 0, maxHp: 0 });
+    expect(getEnhancementGain('weapon', 'purple')).toEqual({ attack: 2, defense: 0, maxHp: 0 });
+    expect(getEnhancementGain('armor', 'gold')).toEqual({ attack: 0, defense: 1, maxHp: 1 });
+    expect(getEnhancementGain('armor', 'dark-gold')).toEqual({ attack: 0, defense: 1, maxHp: 2 });
+    expect(getEnhancementGain('armor', 'purple')).toEqual({ attack: 0, defense: 1, maxHp: 3 });
     expect(getEnhancementBonus('weapon', { power: 20, name: '守墓誓约', tier: 'purple', enhancementLevel: 15 }))
-      .toEqual({ attack: 15, maxHp: 30 });
+      .toEqual({ attack: 30, defense: 0, maxHp: 0 });
   });
 
   it('reduces enhancement success by target level and equipment quality', () => {

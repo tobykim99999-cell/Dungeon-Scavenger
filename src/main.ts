@@ -145,9 +145,10 @@ function warehouseAttributesMarkup(type: 'weapon' | 'armor', equipment: Equipmen
   const attributes = [
     `<span class="warehouse-attribute is-base"><small>原始属性</small><b>${type === 'weapon' ? '攻击' : '防御'} +${equipment.power}</b></span>`,
   ];
-  if (enhancement.attack > 0 || enhancement.maxHp > 0) {
+  if (enhancement.attack > 0 || enhancement.defense > 0 || enhancement.maxHp > 0) {
     const gains = [
       enhancement.attack > 0 ? `攻击 +${enhancement.attack}` : '',
+      enhancement.defense > 0 ? `防御 +${enhancement.defense}` : '',
       enhancement.maxHp > 0 ? `生命 +${enhancement.maxHp}` : '',
     ].filter(Boolean).join(' · ');
     attributes.push(`<span class="warehouse-attribute is-enhancement"><small>强化收益</small><b>${gains}</b></span>`);
@@ -186,7 +187,7 @@ function renderEquipmentValue(
   stats.className = 'equipment-stat-line';
   const primary = document.createElement('span');
   primary.className = 'equipment-stat is-primary';
-  primary.innerHTML = `<small>${type === 'weapon' ? '攻击' : '防御'}</small><b>+${equipment.power + enhancement.attack}</b>`;
+  primary.innerHTML = `<small>${type === 'weapon' ? '攻击' : '防御'}</small><b>+${equipment.power + (type === 'weapon' ? enhancement.attack : enhancement.defense)}</b>`;
   stats.append(primary);
 
   if (enhancement.maxHp > 0) {
@@ -203,7 +204,7 @@ function renderEquipmentValue(
   }
 
   const score = document.createElement('span');
-  score.innerHTML = equipmentScoreMarkup(getEquipmentScore(type, equipment));
+  score.innerHTML = equipmentScoreMarkup(getEquipmentScore(type, equipment), 'current-equipment-score');
 
   element.replaceChildren(title, stats, score);
 }
@@ -544,10 +545,12 @@ function renderArtisan(state: UiState): void {
   const atMax = selected.enhancementLevel >= selected.maxLevel;
   const gains = [
     selected.attackPerLevel > 0 ? `攻击 +${selected.attackPerLevel}` : '',
+    selected.defensePerLevel > 0 ? `防御 +${selected.defensePerLevel}` : '',
     selected.maxHpPerLevel > 0 ? `生命 +${selected.maxHpPerLevel}` : '',
   ].filter(Boolean).join(' · ');
   const totalGains = [
     selected.attackPerLevel > 0 ? `攻击 +${selected.attackPerLevel * selected.enhancementLevel}` : '',
+    selected.defensePerLevel > 0 ? `防御 +${selected.defensePerLevel * selected.enhancementLevel}` : '',
     selected.maxHpPerLevel > 0 ? `生命 +${selected.maxHpPerLevel * selected.enhancementLevel}` : '',
   ].filter(Boolean).join(' · ') || '尚未获得强化属性';
   artisanDetail.innerHTML = `
