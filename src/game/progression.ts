@@ -18,6 +18,7 @@ export interface EnemyBaseStats {
 }
 
 export type EnemyStats = EnemyBaseStats;
+export type EnemyDifficultyProfile = 'standard' | 'normal-fifth' | 'heroic';
 
 export function hasBossAfterFloor(floor: number): boolean {
   return Number.isInteger(floor) && floor > 0 && floor % 10 === 0;
@@ -48,13 +49,20 @@ export function getEnemyAttackDamage(
   return Math.max(isBoss ? 2 : 1, Math.max(0, attack) - effectiveDefense + variance);
 }
 
-export function getEnemyStats(base: EnemyBaseStats, floor: number): EnemyStats {
+export function getEnemyStats(
+  base: EnemyBaseStats,
+  floor: number,
+  profile: EnemyDifficultyProfile = 'standard',
+): EnemyStats {
   const normalized = Math.max(1, Math.floor(floor));
   const scale = 1 + Math.max(0, normalized - 1) * 0.18;
+  const hpMultiplier = profile === 'normal-fifth' ? 1.12 : profile === 'heroic' ? 1.08 : 1;
+  const attackMultiplier = profile === 'normal-fifth' ? 1.22 : profile === 'heroic' ? 1.12 : 1;
+  const defenseBonus = profile === 'standard' ? 0 : 1;
   return {
-    hp: Math.round(base.hp * scale),
-    attack: Math.round(base.attack * scale),
-    defense: base.defense + Math.floor(normalized / 4),
+    hp: Math.round(base.hp * scale * hpMultiplier),
+    attack: Math.round(base.attack * scale * attackMultiplier),
+    defense: base.defense + Math.floor(normalized / 4) + defenseBonus,
     reward: base.reward + normalized,
   };
 }

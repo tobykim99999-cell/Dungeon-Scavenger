@@ -216,7 +216,7 @@ function renderInventory(items: Item[], capacity: number): void {
     const item = items[index];
     const slot = document.createElement('div');
     const tier = item && (item.type === 'weapon' || item.type === 'armor') ? getEquipmentTier(item) : undefined;
-    slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}${tier ? ` tier-${tier}` : ''}${item.affixes?.length ? ' has-affix' : ''}` : ''}`;
+    slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}${tier ? ` is-equipment tier-${tier}` : ''}${item.affixes?.length ? ' has-affix' : ''}${item.setName ? ' has-set' : ''}` : ''}`;
 
     if (item) {
       slot.dataset.itemId = item.id;
@@ -231,8 +231,9 @@ function renderInventory(items: Item[], capacity: number): void {
       itemButton.setAttribute('aria-label', `${item.name}，${item.description}${quantity > 1 ? `，数量 ${quantity}` : ''}`);
       itemButton.innerHTML = `
         <span class="slot-index">${index + 1}</span>
+        ${tier ? `<span class="slot-equipment-tier">${equipmentTierLabel(tier)}</span>` : ''}
         <i data-lucide="${iconForItem(item)}" aria-hidden="true"></i>
-        <strong>${tier ? `${equipmentTierLabel(tier)} · ` : ''}${item.name}</strong>
+        <strong>${item.name}</strong>
         <small>${item.description}</small>
         ${tier ? equipmentScoreMarkup(getEquipmentScore(item.type as 'weapon' | 'armor', item), 'slot-equipment-score') : ''}
         ${item.affixes?.map((affix) => `<em class="slot-affix">${affixText(affix)}</em>`).join('') ?? ''}

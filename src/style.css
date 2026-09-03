@@ -2413,6 +2413,52 @@ button:focus-visible {
   height: 94px;
 }
 
+.bag-slot.is-equipment {
+  height: 96px;
+}
+
+.bag-slot.is-equipment.has-affix {
+  height: 112px;
+}
+
+.bag-slot.is-equipment.has-set {
+  height: 128px;
+}
+
+.bag-slot.is-equipment .bag-item-button {
+  grid-template-rows: auto auto auto;
+  align-items: start;
+  padding: 24px 9px 8px;
+}
+
+.bag-slot.is-equipment .bag-item-button > svg {
+  grid-row: 1 / span 4;
+  align-self: center;
+}
+
+.bag-slot.is-equipment strong,
+.bag-slot.is-equipment small {
+  padding-right: 0;
+}
+
+.slot-equipment-tier {
+  position: absolute;
+  top: 7px;
+  left: 24px;
+  color: #b5a377;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tier-dark-gold .slot-equipment-tier {
+  color: #e6a15d;
+}
+
+.tier-purple .slot-equipment-tier {
+  color: #d29ae9;
+}
+
 .premium-loot-landing,
 .premium-loot-flight {
   --loot-color: #f2a24f;
@@ -2746,7 +2792,13 @@ button:focus-visible {
 
 .warehouse-card-copy {
   min-width: 0;
-  padding-right: 72px;
+  padding-right: 0;
+}
+
+.warehouse-card-copy > small,
+.warehouse-card-copy > strong,
+.warehouse-card-copy > .warehouse-equipped-status {
+  max-width: calc(100% - 72px);
 }
 
 .warehouse-card-copy > strong {
@@ -2822,7 +2874,8 @@ button:focus-visible {
   min-width: 0;
   margin: 0;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .warehouse-attribute small,
@@ -3069,6 +3122,10 @@ footer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0 18px;
     padding: 18px 0 0;
+  }
+
+  .bag-section {
+    grid-column: 1 / -1;
   }
 
   .panel-section + .panel-section {

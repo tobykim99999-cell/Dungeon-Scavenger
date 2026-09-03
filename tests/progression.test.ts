@@ -55,6 +55,16 @@ describe('normal enemy stat scaling', () => {
     expect(getEnemyStats(base, 10)).toEqual({ hp: 29, attack: 13, defense: 3, reward: 18 });
     expect(getEnemyStats(base, 20).defense).toBe(6);
   });
+
+  it('buffs the fifth normal map and keeps the first heroic map strictly higher', () => {
+    const base = { hp: 11, attack: 5, defense: 1, reward: 8 };
+    const normalFifthEnd = getEnemyStats(base, 50, 'normal-fifth');
+    const heroicFirstStart = getEnemyStats(base, 56, 'heroic');
+    expect(normalFifthEnd).toMatchObject({ hp: 121, attack: 60, defense: 14 });
+    expect(heroicFirstStart.hp).toBeGreaterThan(normalFifthEnd.hp);
+    expect(heroicFirstStart.attack).toBeGreaterThan(normalFifthEnd.attack);
+    expect(heroicFirstStart.defense).toBeGreaterThan(normalFifthEnd.defense);
+  });
 });
 
 describe('normal enemy counts', () => {

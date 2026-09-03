@@ -14,8 +14,9 @@ export function createBestiaryRegions(highestUnlockedRegion: number): BestiaryRe
     const region = getRegion(index);
     const theme = getRegionTheme(region.startFloor);
     const enemies: BestiaryCreature[] = theme.enemies.map((template) => {
-      const first = getEnemyStats(template, region.startFloor);
-      const last = getEnemyStats(template, region.endFloor);
+      const profile = index === 4 ? 'normal-fifth' : 'standard';
+      const first = getEnemyStats(template, region.startFloor, profile);
+      const last = getEnemyStats(template, region.endFloor, profile);
       return {
         name: template.name,
         kind: 'enemy',

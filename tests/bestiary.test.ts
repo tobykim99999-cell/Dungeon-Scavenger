@@ -20,4 +20,10 @@ describe('unlocked monster bestiary', () => {
     });
     expect(archive.boss.hp.min).toBe(getBossStats(10).hp);
   });
+
+  it('shows the fifth normal map buff in the archive', () => {
+    const archive = createBestiaryRegions(4)[4];
+    const template = getRegionTheme(41).enemies[2];
+    expect(archive.enemies[2].attack.max).toBe(getEnemyStats(template, 50, 'normal-fifth').attack);
+  });
 });

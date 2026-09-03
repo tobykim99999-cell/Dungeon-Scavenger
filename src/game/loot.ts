@@ -1,9 +1,9 @@
-export const POTION_LOOT_CHANCE = 0.25;
+export const POTION_LOOT_CHANCE = 1 / 6;
 export const MATERIAL_LOOT_CHANCE = 0.25;
 export const WEAPON_LOOT_CHANCE = 0.15;
 export const ARMOR_LOOT_CHANCE = 0.15;
 export const MONSTER_MATERIAL_DROP_CHANCE = 0.15;
-export const MONSTER_POTION_DROP_CHANCE = 0.15;
+export const MONSTER_POTION_DROP_CHANCE = 0.1;
 
 export type RegularLootType = 'potion' | 'material' | 'weapon' | 'armor' | 'nothing';
 export type MonsterLootType = 'material' | 'potion' | 'nothing';

@@ -1085,7 +1085,10 @@ export class GameScene extends Phaser.Scene {
     for (let index = 0; index < enemyCount && positions.length > 0; index += 1) {
       const position = positions.pop()!;
       const template = theme.enemies[this.random.integer(0, theme.enemies.length - 1)];
-      const stats = getEnemyStats(template, this.difficultyFloor);
+      const difficultyProfile = this.adventureMode === 'heroic'
+        ? 'heroic'
+        : (getRegionIndex(this.floor) === 4 ? 'normal-fifth' : 'standard');
+      const stats = getEnemyStats(template, this.difficultyFloor, difficultyProfile);
       this.enemies.push({
         id: `enemy-${this.floor}-${index}`,
         name: template.name,
