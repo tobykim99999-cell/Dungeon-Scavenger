@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { advanceStage, getBossStats, getChestCount, getEnemyCount, getEnemyStats, hasBossAfterFloor } from '../src/game/progression';
+import {
+  advanceStage,
+  getBossStats,
+  getChestCount,
+  getEnemyAttackDamage,
+  getEnemyCount,
+  getEnemyStats,
+  hasBossAfterFloor,
+} from '../src/game/progression';
 import { INVENTORY_CAPACITY } from '../src/game/types';
 
 describe('boss floor progression', () => {
@@ -17,10 +25,16 @@ describe('boss floor progression', () => {
   it('gives the first boss its designed combat values', () => {
     expect(getBossStats(10)).toEqual({
       hp: 135,
-      attack: 12,
+      attack: 16,
       defense: 5,
       reward: 100,
     });
+  });
+
+  it('lets boss basic attacks penetrate part of player defense', () => {
+    expect(getEnemyAttackDamage(23, 20, 0, false)).toBe(3);
+    expect(getEnemyAttackDamage(23, 20, 0, true)).toBe(8);
+    expect(getEnemyAttackDamage(3, 999, 0, true)).toBe(2);
   });
 
   it('keeps increasing boss strength and rewards', () => {

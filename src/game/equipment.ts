@@ -173,3 +173,7 @@ export function rollBossRewardTiers(
 export function isDarkGoldEquipment(equipment: Pick<Equipment, 'tier' | 'gilded'>): boolean {
   return getEquipmentTier(equipment) === 'dark-gold';
 }
+
+export function isPremiumPickupTier(tier: EquipmentTier): tier is 'dark-gold' | 'purple' {
+  return tier === 'dark-gold' || tier === 'purple';
+}

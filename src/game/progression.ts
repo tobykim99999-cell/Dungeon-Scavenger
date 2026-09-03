@@ -32,10 +32,20 @@ export function advanceStage(floor: number, bossStage: boolean): StageProgress {
 export function getBossStats(floor: number): BossStats {
   return {
     hp: 75 + floor * 6,
-    attack: 6 + Math.ceil(floor * 0.6),
+    attack: 8 + Math.ceil(floor * 0.75),
     defense: 3 + Math.floor(floor / 4),
     reward: 40 + floor * 6,
   };
+}
+
+export function getEnemyAttackDamage(
+  attack: number,
+  playerDefense: number,
+  variance: number,
+  isBoss: boolean,
+): number {
+  const effectiveDefense = Math.floor(Math.max(0, playerDefense) * (isBoss ? 0.75 : 1));
+  return Math.max(isBoss ? 2 : 1, Math.max(0, attack) - effectiveDefense + variance);
 }
 
 export function getEnemyStats(base: EnemyBaseStats, floor: number): EnemyStats {

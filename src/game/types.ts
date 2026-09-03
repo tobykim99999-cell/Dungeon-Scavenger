@@ -143,6 +143,15 @@ export interface MerchantReveal {
   tier: EquipmentTier;
 }
 
+export interface LootAnimationDetail {
+  itemId: string;
+  itemType: 'weapon' | 'armor';
+  name: string;
+  tier: 'dark-gold' | 'purple';
+  worldX: number;
+  worldY: number;
+}
+
 export interface BestiaryStatRange {
   min: number;
   max: number;
@@ -290,3 +299,4 @@ export type GameCommand =
 
 export const UI_EVENT = 'abyss:ui-state';
 export const COMMAND_EVENT = 'abyss:command';
+export const LOOT_ANIMATION_EVENT = 'abyss:loot-animation';

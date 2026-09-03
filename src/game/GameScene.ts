@@ -44,6 +44,7 @@ import {
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
+  isPremiumPickupTier,
   resolveSetBonus,
   rollBossRewardTiers,
   rollEnhancementSuccess,
@@ -80,7 +81,14 @@ import {
   type TownLoadoutSelection,
   type VaultEquipment,
 } from './gilding';
-import { advanceStage, getBossStats, getChestCount, getEnemyCount, getEnemyStats } from './progression';
+import {
+  advanceStage,
+  getBossStats,
+  getChestCount,
+  getEnemyAttackDamage,
+  getEnemyCount,
+  getEnemyStats,
+} from './progression';
 import { getRegionTheme } from './themes';
 import {
   getRegion,
@@ -92,6 +100,7 @@ import {
 import {
   COMMAND_EVENT,
   INVENTORY_CAPACITY,
+  LOOT_ANIMATION_EVENT,
   UI_EVENT,
   type AdventureMode,
   type Altar,
@@ -109,6 +118,7 @@ import {
   type GildingOption,
   type Item,
   type ItemType,
+  type LootAnimationDetail,
   type MerchantOffer,
   type MerchantReveal,
   type MoveDirection,
@@ -1302,6 +1312,7 @@ export class GameScene extends Phaser.Scene {
       for (let index = 0; index < rewardTypes.length; index += 1) {
         const reward = this.createItem(rewardTypes[index], 'rare', rewardTiers[index]);
         this.addItem(reward);
+        this.animatePremiumPickup(reward, enemy);
         this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
       }
       this.pushLog('守层者倒下，通往下层的楼梯出现了。');
@@ -1355,7 +1366,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   private enemyAttack(enemy: Enemy): void {
-    const damage = Math.max(1, enemy.attack - this.totalDefense + this.random.integer(0, 1));
+    const damage = getEnemyAttackDamage(
+      enemy.attack,
+      this.totalDefense,
+      this.random.integer(0, 1),
+      enemy.isBoss,
+    );
     this.damagePlayer(damage, `${enemy.name}对你造成 ${damage} 点伤害。`, 'player');
   }
 
@@ -1528,6 +1544,7 @@ export class GameScene extends Phaser.Scene {
       : '';
     this.pushLog(`打开旧木箱：${tier}${chest.loot.name}。`);
     this.addItem(chest.loot);
+    this.animatePremiumPickup(chest.loot, chest);
   }
 
   private openGildingAltar(): void {
@@ -1712,10 +1729,17 @@ export class GameScene extends Phaser.Scene {
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
     this.refreshArtisanOptions();
+    this.artisanSelectedId = this.artisanOptions?.[0]?.targetId ?? null;
     this.emitUiState();
   }
 
   private refreshArtisanOptions(): void {
+    const tierPriority: Record<EquipmentTier, number> = {
+      common: 0,
+      gold: 1,
+      'dark-gold': 2,
+      purple: 3,
+    };
     this.artisanOptions = this.vault.flatMap((item) => {
       const tier = getEquipmentTier(item);
       const maxLevel = getEnhancementMaxLevel(tier);
@@ -1740,7 +1764,12 @@ export class GameScene extends Phaser.Scene {
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
       }];
-    });
+    }).sort((left, right) =>
+      Number(right.equipped) - Number(left.equipped) ||
+      tierPriority[right.tier] - tierPriority[left.tier] ||
+      right.enhancementLevel - left.enhancementLevel ||
+      left.name.localeCompare(right.name, 'zh-CN'),
+    );
   }
 
   private selectArtisanEquipment(targetId: string): void {
@@ -2021,6 +2050,21 @@ export class GameScene extends Phaser.Scene {
     }
     this.inventory.push(item);
     this.queueCarryableEquipment(item);
+  }
+
+  private animatePremiumPickup(item: Item, origin: Point): void {
+    if (item.type !== 'weapon' && item.type !== 'armor') return;
+    const tier = getEquipmentTier(item);
+    if (!isPremiumPickupTier(tier)) return;
+    const detail: LootAnimationDetail = {
+      itemId: item.id,
+      itemType: item.type,
+      name: item.name,
+      tier,
+      worldX: origin.x * TILE_SIZE + TILE_SIZE / 2,
+      worldY: origin.y * TILE_SIZE + TILE_SIZE / 2,
+    };
+    window.dispatchEvent(new CustomEvent<LootAnimationDetail>(LOOT_ANIMATION_EVENT, { detail }));
   }
 
   private queueCarryableEquipment(item: Item): void {

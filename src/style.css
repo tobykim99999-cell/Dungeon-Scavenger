@@ -691,6 +691,9 @@ button:focus-visible {
 }
 
 .artisan-option {
+  --artisan-tier-color: #d5ab64;
+  --artisan-tier-background: #1d1c19;
+  --artisan-tier-hover: #29241c;
   width: 100%;
   min-width: 0;
   min-height: 62px;
@@ -702,39 +705,62 @@ button:focus-visible {
   border: 1px solid #5d4d3d;
   border-radius: 3px;
   color: var(--text);
-  background: #1d1c19;
+  background: var(--artisan-tier-background);
   text-align: left;
   cursor: pointer;
 }
 
 .artisan-option.tier-dark-gold {
+  --artisan-tier-color: #e49a53;
+  --artisan-tier-background: #2a2119;
+  --artisan-tier-hover: #34261b;
   border-color: #a86635;
-  background: #2a2119;
 }
 
 .artisan-option.tier-purple {
+  --artisan-tier-color: #c88ce9;
+  --artisan-tier-background: #241c29;
+  --artisan-tier-hover: #2e2036;
   border-color: #895aa8;
-  background: #241c29;
 }
 
 .artisan-option:hover,
 .artisan-option.is-selected {
-  border-color: #dc9561;
-  background: #2b211b;
+  border-color: var(--artisan-tier-color);
+  background: var(--artisan-tier-hover);
 }
 
 .artisan-option.is-selected {
-  box-shadow: inset 3px 0 0 #dc9561;
+  box-shadow: inset 3px 0 0 var(--artisan-tier-color);
 }
 
-.artisan-option.is-equipped:not(.is-selected) {
+.artisan-option.is-equipped {
   border-color: #768b58;
-  box-shadow: inset 3px 0 0 #8fac62;
+  box-shadow: inset 3px 0 0 var(--artisan-tier-color), inset 0 0 0 1px rgba(143, 172, 98, 0.16);
 }
 
-.artisan-option.is-equipped small,
-.artisan-detail-title.is-equipped small {
-  color: #b4c88d;
+.artisan-option .artisan-tier-copy,
+.artisan-detail-title .artisan-tier-copy {
+  color: var(--artisan-tier-color, #d5ab64);
+}
+
+.artisan-option small,
+.artisan-detail-title small {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.artisan-equipped-label {
+  color: #a8c97d;
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.artisan-equipped-label::before {
+  content: '●';
+  margin-right: 3px;
+  font-size: 6px;
 }
 
 .artisan-option > svg {
@@ -751,8 +777,19 @@ button:focus-visible {
   color: #c88ce9;
 }
 
+.artisan-option.tier-dark-gold strong,
+.artisan-option.tier-dark-gold > b,
+.artisan-detail-title.tier-dark-gold strong {
+  color: #e7a15b;
+}
+
+.artisan-option.tier-purple strong,
+.artisan-option.tier-purple > b,
+.artisan-detail-title.tier-purple strong {
+  color: #d2a0ec;
+}
+
 .artisan-option span,
-.artisan-option small,
 .artisan-option strong,
 .artisan-option em {
   min-width: 0;
@@ -824,10 +861,19 @@ button:focus-visible {
 }
 
 .artisan-detail-title {
+  --artisan-tier-color: #d5ab64;
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   align-items: center;
   gap: 9px;
+}
+
+.artisan-detail-title.tier-dark-gold {
+  --artisan-tier-color: #e49a53;
+}
+
+.artisan-detail-title.tier-purple {
+  --artisan-tier-color: #c88ce9;
 }
 
 .artisan-detail-title > svg {
@@ -2363,6 +2409,180 @@ button:focus-visible {
 
 .bag-slot.has-affix {
   height: 94px;
+}
+
+.premium-loot-landing,
+.premium-loot-flight {
+  --loot-color: #f2a24f;
+  --loot-core: #fff0ad;
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.premium-loot-landing.tier-purple,
+.premium-loot-flight.tier-purple {
+  --loot-color: #c477ef;
+  --loot-core: #fff0ff;
+}
+
+.premium-loot-landing {
+  width: 96px;
+  height: 150px;
+  transform: translate(-50%, -72%);
+}
+
+.premium-loot-landing::before {
+  position: absolute;
+  left: 50%;
+  bottom: 28px;
+  width: 34px;
+  height: 122px;
+  background: linear-gradient(to top, var(--loot-color), transparent);
+  filter: blur(3px);
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.3);
+  box-shadow: 0 0 30px var(--loot-color);
+  content: '';
+  animation: premium-loot-beam 850ms ease-out both;
+}
+
+.premium-loot-landing.tier-purple::before {
+  width: 54px;
+  height: 148px;
+  animation-duration: 1050ms;
+  box-shadow: 0 0 44px var(--loot-color), 0 0 18px var(--loot-core);
+}
+
+.premium-loot-ring {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  width: 66px;
+  height: 24px;
+  border: 2px solid var(--loot-color);
+  border-radius: 50%;
+  opacity: 0;
+  transform: translateX(-50%) scale(0.2);
+  box-shadow: 0 0 18px var(--loot-color);
+  animation: premium-loot-ring 900ms ease-out both;
+}
+
+.premium-loot-landing.tier-purple .premium-loot-ring {
+  width: 86px;
+  height: 32px;
+  border-color: var(--loot-core);
+  animation-duration: 1100ms;
+}
+
+.premium-loot-particles,
+.premium-loot-particles span {
+  position: absolute;
+  inset: 0;
+}
+
+.premium-loot-particles span::before {
+  --particle-x: -34px;
+  --particle-y: -80px;
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  width: 5px;
+  height: 5px;
+  background: var(--loot-core);
+  box-shadow: 0 0 9px var(--loot-color);
+  opacity: 0;
+  content: '';
+  animation: premium-loot-spark 820ms ease-out both;
+}
+
+.premium-loot-particles span:nth-child(2)::before { --particle-x: 38px; --particle-y: -92px; animation-delay: 50ms; }
+.premium-loot-particles span:nth-child(3)::before { --particle-x: -48px; --particle-y: -48px; animation-delay: 90ms; }
+.premium-loot-particles span:nth-child(4)::before { --particle-x: 48px; --particle-y: -56px; animation-delay: 130ms; }
+.premium-loot-particles span:nth-child(5)::before { --particle-x: -20px; --particle-y: -118px; animation-delay: 170ms; }
+.premium-loot-particles span:nth-child(6)::before { --particle-x: 18px; --particle-y: -126px; animation-delay: 210ms; }
+.premium-loot-particles span:nth-child(7)::before { --particle-x: 56px; --particle-y: -30px; animation-delay: 250ms; }
+.premium-loot-particles span:nth-child(8)::before { --particle-x: -58px; --particle-y: -112px; animation-delay: 80ms; }
+.premium-loot-particles span:nth-child(9)::before { --particle-x: 64px; --particle-y: -108px; animation-delay: 150ms; }
+.premium-loot-particles span:nth-child(10)::before { --particle-x: -70px; --particle-y: -70px; animation-delay: 220ms; }
+.premium-loot-particles span:nth-child(11)::before { --particle-x: 70px; --particle-y: -76px; animation-delay: 270ms; }
+.premium-loot-particles span:nth-child(12)::before { --particle-x: 0px; --particle-y: -146px; animation-delay: 310ms; }
+
+.premium-loot-flight {
+  top: 0;
+  left: 0;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--loot-color);
+  border-radius: 5px;
+  color: var(--loot-core);
+  background: #2d2118;
+  box-shadow: 0 0 22px var(--loot-color), inset 0 0 14px rgba(255, 255, 255, 0.12);
+  will-change: transform, opacity;
+}
+
+.premium-loot-flight.tier-purple {
+  background: #281a30;
+  box-shadow: 0 0 34px var(--loot-color), 0 0 12px var(--loot-core), inset 0 0 18px rgba(255, 255, 255, 0.16);
+}
+
+.premium-loot-flight svg {
+  width: 25px;
+  height: 25px;
+}
+
+.premium-loot-flight strong {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  width: max-content;
+  max-width: 170px;
+  padding: 4px 7px;
+  border: 1px solid var(--loot-color);
+  color: var(--loot-core);
+  background: rgba(11, 13, 13, 0.94);
+  font-size: 9px;
+  line-height: 1.35;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.bag-section.loot-arrival-dark-gold {
+  animation: bag-arrival-dark-gold 650ms ease-out;
+}
+
+.bag-section.loot-arrival-purple {
+  animation: bag-arrival-purple 650ms ease-out;
+}
+
+@keyframes premium-loot-beam {
+  0% { opacity: 0; transform: translateX(-50%) scaleX(0.2); }
+  22%, 62% { opacity: 0.72; transform: translateX(-50%) scaleX(1); }
+  100% { opacity: 0; transform: translateX(-50%) scaleX(0.58); }
+}
+
+@keyframes premium-loot-ring {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.2); }
+  28% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) scale(1.75); }
+}
+
+@keyframes premium-loot-spark {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.3); }
+  22% { opacity: 1; }
+  100% { opacity: 0; transform: translate(var(--particle-x), var(--particle-y)) scale(1.2); }
+}
+
+@keyframes bag-arrival-dark-gold {
+  0%, 100% { box-shadow: none; }
+  35% { box-shadow: inset 0 0 0 1px #d88b42, 0 0 24px rgba(216, 139, 66, 0.35); }
+}
+
+@keyframes bag-arrival-purple {
+  0%, 100% { box-shadow: none; }
+  35% { box-shadow: inset 0 0 0 1px #c477ef, 0 0 34px rgba(196, 119, 239, 0.48); }
 }
 
 .bag-slot svg {

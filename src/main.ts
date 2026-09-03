@@ -10,12 +10,14 @@ import {
 } from './game/equipment';
 import {
   COMMAND_EVENT,
+  LOOT_ANIMATION_EVENT,
   UI_EVENT,
   type BestiaryCreature,
   type Equipment,
   type EquipmentAffix,
   type GameCommand,
   type Item,
+  type LootAnimationDetail,
   type UiState,
 } from './game/types';
 
@@ -184,6 +186,7 @@ function renderInventory(items: Item[], capacity: number): void {
     slot.className = `bag-slot${item ? ` has-item rarity-${item.rarity}${item.gilded ? ' is-gilded' : ''}${tier ? ` tier-${tier}` : ''}${item.affixes?.length ? ' has-affix' : ''}` : ''}`;
 
     if (item) {
+      slot.dataset.itemId = item.id;
       const quantity = Math.max(1, item.quantity ?? 1);
       const itemButton = document.createElement('button');
       itemButton.type = 'button';
@@ -221,6 +224,88 @@ function renderInventory(items: Item[], capacity: number): void {
 
     bagGrid.append(slot);
   }
+}
+
+function playPremiumLootAnimation(detail: LootAnimationDetail): void {
+  window.requestAnimationFrame(() => {
+    const canvas = document.querySelector<HTMLCanvasElement>('#game-stage canvas');
+    if (!canvas) return;
+    const canvasRect = canvas.getBoundingClientRect();
+    const originX = canvasRect.left + detail.worldX * (canvasRect.width / canvas.width);
+    const originY = canvasRect.top + detail.worldY * (canvasRect.height / canvas.height);
+    const targetSlot = [...bagGrid.querySelectorAll<HTMLElement>('[data-item-id]')]
+      .find((slot) => slot.dataset.itemId === detail.itemId);
+    const slotRect = targetSlot?.getBoundingClientRect();
+    const fallbackRect = bagCount.getBoundingClientRect();
+    const slotVisible = Boolean(
+      slotRect &&
+      slotRect.bottom > 0 &&
+      slotRect.top < window.innerHeight &&
+      slotRect.right > 0 &&
+      slotRect.left < window.innerWidth
+    );
+    const targetRect = slotVisible ? slotRect! : fallbackRect;
+    const targetX = targetRect.left + targetRect.width / 2;
+    const targetY = targetRect.top + targetRect.height / 2;
+    const tierClass = `tier-${detail.tier}`;
+
+    const landing = document.createElement('div');
+    landing.className = `premium-loot-landing ${tierClass}`;
+    landing.style.left = `${originX}px`;
+    landing.style.top = `${originY}px`;
+    landing.setAttribute('aria-hidden', 'true');
+    landing.innerHTML = `<div class="premium-loot-ring"></div><div class="premium-loot-particles">${'<span></span>'.repeat(detail.tier === 'purple' ? 12 : 7)}</div>`;
+
+    const flight = document.createElement('div');
+    flight.className = `premium-loot-flight ${tierClass}`;
+    flight.setAttribute('aria-hidden', 'true');
+    flight.innerHTML = `<i data-lucide="${detail.itemType === 'weapon' ? 'sword' : 'shield'}"></i><strong>${equipmentTierLabel(detail.tier)} · ${detail.name}</strong>`;
+    document.body.append(landing, flight);
+    createIcons({ icons });
+
+    const halfSize = 26;
+    const duration = detail.tier === 'purple' ? 1500 : 1250;
+    const animation = flight.animate([
+      {
+        transform: `translate(${originX - halfSize}px, ${originY - 92}px) scale(0.45) rotate(-8deg)`,
+        opacity: 0,
+        offset: 0,
+      },
+      {
+        transform: `translate(${originX - halfSize}px, ${originY - halfSize}px) scale(1.18) rotate(3deg)`,
+        opacity: 1,
+        offset: 0.2,
+      },
+      {
+        transform: `translate(${originX - halfSize}px, ${originY - halfSize - 12}px) scale(1) rotate(0deg)`,
+        opacity: 1,
+        offset: 0.48,
+      },
+      {
+        transform: `translate(${targetX - halfSize}px, ${targetY - halfSize}px) scale(0.34) rotate(10deg)`,
+        opacity: 0.92,
+        offset: 0.94,
+      },
+      {
+        transform: `translate(${targetX - halfSize}px, ${targetY - halfSize}px) scale(0.08) rotate(12deg)`,
+        opacity: 0,
+        offset: 1,
+      },
+    ], {
+      duration,
+      easing: 'cubic-bezier(.2,.75,.2,1)',
+      fill: 'forwards',
+    });
+
+    window.setTimeout(() => landing.remove(), detail.tier === 'purple' ? 1050 : 850);
+    animation.finished.finally(() => {
+      flight.remove();
+      bagSection.classList.remove('loot-arrival-dark-gold', 'loot-arrival-purple');
+      void bagSection.offsetWidth;
+      bagSection.classList.add(`loot-arrival-${detail.tier}`);
+      window.setTimeout(() => bagSection.classList.remove(`loot-arrival-${detail.tier}`), 650);
+    });
+  });
 }
 
 function renderDiscard(state: UiState): void {
@@ -401,7 +486,7 @@ function renderArtisan(state: UiState): void {
     button.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
       <span>
-        <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}${option.equipped ? ' · 已装备' : ''}</small>
+        <small><span class="artisan-tier-copy">${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</span>${option.equipped ? '<b class="artisan-equipped-label">已装备</b>' : ''}</small>
         <strong>${option.name}</strong>
         <em>强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
       </span>
@@ -429,7 +514,7 @@ function renderArtisan(state: UiState): void {
   artisanDetail.innerHTML = `
     <div class="artisan-detail-title tier-${selected.tier}${selected.equipped ? ' is-equipped' : ''}">
       <i data-lucide="${selected.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}${selected.equipped ? ' · 已装备' : ''}</small><strong>${selected.name}</strong></span>
+      <span><small><span class="artisan-tier-copy">${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}</span>${selected.equipped ? '<b class="artisan-equipped-label">已装备</b>' : ''}</small><strong>${selected.name}</strong></span>
     </div>
     <div class="artisan-level-track"><span>+${selected.enhancementLevel}</span><i></i><b>+${selected.maxLevel}</b></div>
     <dl class="artisan-detail-stats">
@@ -685,6 +770,10 @@ function renderState(state: UiState): void {
 
 window.addEventListener(UI_EVENT, (event) => {
   renderState((event as CustomEvent<UiState>).detail);
+});
+
+window.addEventListener(LOOT_ANIMATION_EVENT, (event) => {
+  playPremiumLootAnimation((event as CustomEvent<LootAnimationDetail>).detail);
 });
 
 startButton.addEventListener('click', () => sendCommand({ action: 'start' }));

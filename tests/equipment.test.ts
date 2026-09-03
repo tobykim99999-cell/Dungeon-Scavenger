@@ -12,6 +12,7 @@ import {
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
+  isPremiumPickupTier,
   rollBossRewardTiers,
   rollEnhancementSuccess,
   resolveSetBonus,
@@ -58,6 +59,13 @@ describe('equipment tiers', () => {
     expect(isDarkGoldEquipment({ tier: 'dark-gold' })).toBe(true);
     expect(isDarkGoldEquipment({ tier: 'gold' })).toBe(false);
     expect(isDarkGoldEquipment({ tier: 'purple' })).toBe(false);
+  });
+
+  it('animates only dark-gold and purple equipment pickups', () => {
+    expect(isPremiumPickupTier('common')).toBe(false);
+    expect(isPremiumPickupTier('gold')).toBe(false);
+    expect(isPremiumPickupTier('dark-gold')).toBe(true);
+    expect(isPremiumPickupTier('purple')).toBe(true);
   });
 
   it('uses the bounded enhancement curve for each equipment tier', () => {
