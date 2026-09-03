@@ -63,6 +63,7 @@ export interface GildingOption {
   power: number;
   source: 'equipped' | 'inventory';
   quantity?: number;
+  score?: number;
 }
 
 export interface TownLoadoutOption {
@@ -76,6 +77,7 @@ export interface TownLoadoutOption {
   setName?: string;
   setBonus?: EquipmentAffix;
   enhancementLevel: number;
+  score: number;
   equipped: boolean;
   starter: boolean;
 }
@@ -94,6 +96,7 @@ export interface ArtisanOption {
   maxHpPerLevel: number;
   successChance: number;
   equipped: boolean;
+  score: number;
 }
 
 export interface EnhancementConfirmation {
@@ -141,6 +144,7 @@ export interface MerchantReveal {
   type: 'weapon' | 'armor';
   power: number;
   tier: EquipmentTier;
+  score: number;
 }
 
 export interface LootAnimationDetail {

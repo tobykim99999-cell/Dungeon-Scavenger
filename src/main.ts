@@ -6,6 +6,7 @@ import {
   equipmentTierLabel,
   getEnhancementBonus,
   getEnhancementLevel,
+  getEquipmentScore,
   getEquipmentTier,
 } from './game/equipment';
 import {
@@ -135,6 +136,34 @@ function affixText(affix: EquipmentAffix): string {
   return `${affix.label} · ${statLabels[affix.stat]}${value}`;
 }
 
+function equipmentScoreMarkup(score: number, className = ''): string {
+  return `<span class="equipment-score${className ? ` ${className}` : ''}" aria-label="装备评分 ${score}"><i data-lucide="gauge" aria-hidden="true"></i><small>评分</small><b>${score}</b></span>`;
+}
+
+function warehouseAttributesMarkup(type: 'weapon' | 'armor', equipment: Equipment): string {
+  const enhancement = getEnhancementBonus(type, equipment);
+  const attributes = [
+    `<span class="warehouse-attribute is-base"><small>原始属性</small><b>${type === 'weapon' ? '攻击' : '防御'} +${equipment.power}</b></span>`,
+  ];
+  if (enhancement.attack > 0 || enhancement.maxHp > 0) {
+    const gains = [
+      enhancement.attack > 0 ? `攻击 +${enhancement.attack}` : '',
+      enhancement.maxHp > 0 ? `生命 +${enhancement.maxHp}` : '',
+    ].filter(Boolean).join(' · ');
+    attributes.push(`<span class="warehouse-attribute is-enhancement"><small>强化收益</small><b>${gains}</b></span>`);
+  }
+  for (const affix of equipment.affixes ?? []) {
+    attributes.push(`<span class="warehouse-attribute is-affix"><small>附加词条</small><b>${affixText(affix)}</b></span>`);
+  }
+  if (equipment.setName) {
+    const setDescription = equipment.setBonus
+      ? `${equipment.setName} · ${affixText(equipment.setBonus)}`
+      : equipment.setName;
+    attributes.push(`<span class="warehouse-attribute is-set"><small>套装属性</small><b>${setDescription}</b></span>`);
+  }
+  return `<span class="warehouse-attributes">${attributes.join('')}</span>`;
+}
+
 function renderEquipmentValue(
   element: HTMLElement,
   equipment: Equipment,
@@ -173,7 +202,10 @@ function renderEquipmentValue(
     stats.append(level);
   }
 
-  element.replaceChildren(title, stats);
+  const score = document.createElement('span');
+  score.innerHTML = equipmentScoreMarkup(getEquipmentScore(type, equipment));
+
+  element.replaceChildren(title, stats, score);
 }
 
 function renderInventory(items: Item[], capacity: number): void {
@@ -201,6 +233,7 @@ function renderInventory(items: Item[], capacity: number): void {
         <i data-lucide="${iconForItem(item)}" aria-hidden="true"></i>
         <strong>${tier ? `${equipmentTierLabel(tier)} · ` : ''}${item.name}</strong>
         <small>${item.description}</small>
+        ${tier ? equipmentScoreMarkup(getEquipmentScore(item.type as 'weapon' | 'armor', item), 'slot-equipment-score') : ''}
         ${item.affixes?.map((affix) => `<em class="slot-affix">${affixText(affix)}</em>`).join('') ?? ''}
         ${item.setName ? `<em class="slot-set">套装 · ${item.setName}</em>` : ''}
         ${quantity > 1 ? `<b class="slot-quantity">×${quantity}</b>` : ''}
@@ -344,6 +377,7 @@ function renderGilding(state: UiState): void {
       <span>
         <small>${option.source === 'equipped' ? '当前装备' : '行囊装备'}</small>
         <strong>${option.name}</strong>
+        ${option.score ? equipmentScoreMarkup(option.score, 'compact-equipment-score') : ''}
       </span>
       <b>${option.type === 'material' ? `×${option.quantity ?? 1}` : `+${option.power}`}</b>
     `;
@@ -393,14 +427,10 @@ function renderTownLoadout(state: UiState): void {
     row.className = `warehouse-equipped-row tier-${getEquipmentTier(equipment.value)}${equipment.value.gilded ? ' is-gilded' : ''}`;
     row.innerHTML = `
       <i data-lucide="${equipment.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span><small>${equipmentTierLabel(getEquipmentTier(equipment.value))} · ${equipment.label} · 强化 +${getEnhancementLevel(equipment.value)}</small><strong>${equipment.value.name}</strong></span>
-      <b>+${equipment.value.power}</b>
+      <span class="warehouse-card-copy"><small>${equipmentTierLabel(getEquipmentTier(equipment.value))} · ${equipment.label} · 强化 +${getEnhancementLevel(equipment.value)}</small><strong>${equipment.value.name}</strong></span>
+      ${equipmentScoreMarkup(getEquipmentScore(equipment.type, equipment.value), 'warehouse-card-score')}
+      ${warehouseAttributesMarkup(equipment.type, equipment.value)}
     `;
-    for (const affix of equipment.value.affixes ?? []) {
-      const detail = document.createElement('em');
-      detail.textContent = affixText(affix);
-      row.append(detail);
-    }
     townEquippedSummary.append(row);
   }
 
@@ -433,13 +463,21 @@ function renderTownLoadout(state: UiState): void {
     equipButton.setAttribute('aria-label', `装备${option.name}`);
     equipButton.innerHTML = `
       <i data-lucide="${option.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
-      <span>
+      <span class="warehouse-card-copy">
         <small>${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'} · 强化 +${option.enhancementLevel}</small>
         <strong>${option.name}</strong>
-        ${option.affixes.map((affix) => `<em>${affixText(affix)}</em>`).join('')}
-        ${option.setName ? `<em>套装 · ${option.setName}</em>` : ''}
+        ${option.equipped ? '<em class="warehouse-equipped-status">已装备</em>' : ''}
+        ${warehouseAttributesMarkup(option.type, {
+          name: option.name,
+          power: option.power,
+          tier: option.tier,
+          affixes: option.affixes,
+          setName: option.setName,
+          setBonus: option.setBonus,
+          enhancementLevel: option.enhancementLevel,
+        })}
       </span>
-      <b>${option.equipped ? '已装备' : `+${option.power}`}</b>
+      ${equipmentScoreMarkup(option.score, 'warehouse-card-score')}
     `;
     equipButton.addEventListener('click', () => sendCommand({ action: 'equip-town', targetId: option.targetId }));
 
@@ -489,6 +527,7 @@ function renderArtisan(state: UiState): void {
         <small><span class="artisan-tier-copy">${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</span>${option.equipped ? '<b class="artisan-equipped-label">已装备</b>' : ''}</small>
         <strong>${option.name}</strong>
         <em>强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
+        ${equipmentScoreMarkup(option.score, 'compact-equipment-score')}
       </span>
       <b>+${option.enhancementLevel}</b>
     `;
@@ -515,6 +554,7 @@ function renderArtisan(state: UiState): void {
     <div class="artisan-detail-title tier-${selected.tier}${selected.equipped ? ' is-equipped' : ''}">
       <i data-lucide="${selected.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>
       <span><small><span class="artisan-tier-copy">${equipmentTierLabel(selected.tier)} · ${selected.type === 'weapon' ? '武器' : '护甲'}</span>${selected.equipped ? '<b class="artisan-equipped-label">已装备</b>' : ''}</small><strong>${selected.name}</strong></span>
+      ${equipmentScoreMarkup(selected.score, 'artisan-detail-score')}
     </div>
     <div class="artisan-level-track"><span>+${selected.enhancementLevel}</span><i></i><b>+${selected.maxLevel}</b></div>
     <dl class="artisan-detail-stats">
@@ -646,7 +686,7 @@ function renderMerchant(state: UiState): void {
     merchantRevealKicker.textContent = `${reveal.regionName}罐 · ${equipmentTierLabel(reveal.tier)}`;
     merchantRevealItemIcon.innerHTML = `<i data-lucide="${reveal.type === 'weapon' ? 'sword' : 'shield'}" aria-hidden="true"></i>`;
     merchantRevealName.textContent = reveal.name;
-    merchantRevealPower.textContent = `${reveal.type === 'weapon' ? '武器 · 攻击' : '护甲 · 防御'} +${reveal.power}`;
+    merchantRevealPower.innerHTML = `${reveal.type === 'weapon' ? '武器 · 攻击' : '护甲 · 防御'} +${reveal.power}${equipmentScoreMarkup(reveal.score, 'compact-equipment-score')}`;
     if (reveal.sequence !== activeMerchantRevealSequence) {
       activeMerchantRevealSequence = reveal.sequence;
       if (merchantRevealTimer !== undefined) window.clearTimeout(merchantRevealTimer);

@@ -41,6 +41,7 @@ import {
   getEnhancementLevel,
   getEnhancementMaxLevel,
   getEnhancementSuccessChance,
+  getEquipmentScore,
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
@@ -1556,6 +1557,7 @@ export class GameScene extends Phaser.Scene {
         type: 'weapon',
         power: this.weapon.power,
         source: 'equipped',
+        score: getEquipmentScore('weapon', this.weapon),
       });
     }
     if (canGildEquipment(this.armor)) {
@@ -1565,6 +1567,7 @@ export class GameScene extends Phaser.Scene {
         type: 'armor',
         power: this.armor.power,
         source: 'equipped',
+        score: getEquipmentScore('armor', this.armor),
       });
     }
     for (const item of this.inventory) {
@@ -1575,6 +1578,7 @@ export class GameScene extends Phaser.Scene {
           type: item.type,
           power: item.power,
           source: 'inventory',
+          score: getEquipmentScore(item.type, item),
         });
       } else if (item.type === 'material' && !item.gilded) {
         options.push({
@@ -1682,6 +1686,7 @@ export class GameScene extends Phaser.Scene {
         tier: 'common',
         affixes: [],
         enhancementLevel: 0,
+        score: getEquipmentScore('weapon', { name: '缺口短剑', power: 2, tier: 'common' }),
         equipped: !this.townLoadout.weaponId,
         starter: true,
       },
@@ -1694,6 +1699,7 @@ export class GameScene extends Phaser.Scene {
         tier: 'common',
         affixes: [],
         enhancementLevel: 0,
+        score: getEquipmentScore('armor', { name: '旧皮甲', power: 1, tier: 'common' }),
         equipped: !this.townLoadout.armorId,
         starter: true,
       },
@@ -1708,6 +1714,7 @@ export class GameScene extends Phaser.Scene {
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
         enhancementLevel: getEnhancementLevel(item),
+        score: getEquipmentScore(item.type, item),
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
@@ -1760,6 +1767,7 @@ export class GameScene extends Phaser.Scene {
         attackPerLevel: gain.attack,
         maxHpPerLevel: gain.maxHp,
         successChance: getEnhancementSuccessChance(tier, enhancementLevel + 1),
+        score: getEquipmentScore(item.type, item),
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
@@ -1913,6 +1921,7 @@ export class GameScene extends Phaser.Scene {
       type,
       power: reward.power,
       tier,
+      score: getEquipmentScore(type, reward),
     };
     this.playSound(tier === 'gold' ? 'open' : 'coins', tier === 'purple' ? 0.62 : 0.5);
     this.pushLog(`打开${region.name}罐子，获得${equipmentTierLabel(tier)}：${reward.name}。`);

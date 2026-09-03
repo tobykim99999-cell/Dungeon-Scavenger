@@ -9,6 +9,7 @@ import {
   getEnhancementLevel,
   getEnhancementMaxLevel,
   getEnhancementSuccessChance,
+  getEquipmentScore,
   getEquipmentTier,
   isCarryableEquipment,
   isDarkGoldEquipment,
@@ -66,6 +67,24 @@ describe('equipment tiers', () => {
     expect(isPremiumPickupTier('gold')).toBe(false);
     expect(isPremiumPickupTier('dark-gold')).toBe(true);
     expect(isPremiumPickupTier('purple')).toBe(true);
+  });
+
+  it('scores equipment from power, quality, affixes and enhancement', () => {
+    expect(getEquipmentScore('weapon', { name: '缺口短剑', power: 2, tier: 'common' })).toBe(6);
+    expect(getEquipmentScore('weapon', {
+      name: '黯星战刃',
+      power: 25,
+      tier: 'dark-gold',
+      enhancementLevel: 8,
+      affixes: [{ stat: 'defense', value: 3, label: '坚韧' }],
+    })).toBe(137);
+    expect(getEquipmentScore('armor', {
+      name: '深渊回响',
+      power: 21,
+      tier: 'purple',
+      affixes: [{ stat: 'attack', value: 2, label: '锋锐' }],
+      setBonus: { stat: 'maxHp', value: 12, label: '深渊血脉' },
+    })).toBe(118);
   });
 
   it('uses the bounded enhancement curve for each equipment tier', () => {

@@ -85,6 +85,36 @@ export function getEnhancementBonus(
   return { attack: gain.attack * level, maxHp: gain.maxHp * level };
 }
 
+function equipmentAffixScore(affix: EquipmentAffix): number {
+  if (affix.stat === 'attack' || affix.stat === 'defense') return affix.value * 2;
+  if (affix.stat === 'maxHp') return affix.value * 0.5;
+  if (affix.stat === 'crit') return affix.value * 0.8;
+  return affix.value * 3;
+}
+
+export function getEquipmentScore(type: 'weapon' | 'armor', equipment: Equipment): number {
+  const enhancement = getEnhancementBonus(type, equipment);
+  const primaryPower = equipment.power + (type === 'weapon' ? enhancement.attack : 0);
+  const affixScore = (equipment.affixes ?? []).reduce(
+    (total, affix) => total + equipmentAffixScore(affix),
+    0,
+  );
+  const tierScore: Record<EquipmentTier, number> = {
+    common: 0,
+    gold: 12,
+    'dark-gold': 28,
+    purple: 48,
+  };
+  const setPotential = equipment.setBonus ? equipmentAffixScore(equipment.setBonus) * 0.5 : 0;
+  return Math.max(1, Math.round(
+    primaryPower * 3 +
+    enhancement.maxHp * 0.5 +
+    affixScore +
+    tierScore[getEquipmentTier(equipment)] +
+    setPotential,
+  ));
+}
+
 export function getEnhancementSuccessChance(tier: EquipmentTier, nextLevel: number): number {
   if (nextLevel < 1 || nextLevel > getEnhancementMaxLevel(tier)) return 0;
   const base = tier === 'gold' ? 100 : tier === 'dark-gold' ? 95 : tier === 'purple' ? 90 : 0;

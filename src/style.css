@@ -2631,6 +2631,232 @@ button:focus-visible {
   word-break: normal;
 }
 
+.equipment-score,
+.warehouse-equipped-row .equipment-score,
+.town-vault-equip .equipment-score,
+.gilding-option .equipment-score,
+.artisan-option .equipment-score,
+.jar-reveal-copy .equipment-score {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  width: max-content;
+  margin-top: 4px;
+  color: #9fb1b0;
+  font-family: Bahnschrift, "Microsoft YaHei UI", sans-serif;
+  line-height: 1;
+}
+
+.equipment-score svg {
+  position: static;
+  width: 11px;
+  height: 11px;
+  color: #7f9695;
+}
+
+.equipment-score small,
+.warehouse-equipped-row .equipment-score small,
+.town-vault-equip .equipment-score small,
+.gilding-option .equipment-score small,
+.artisan-option .equipment-score small {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  color: #778886;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.equipment-score b,
+.warehouse-equipped-row .equipment-score b,
+.town-vault-equip .equipment-score b,
+.gilding-option .equipment-score b,
+.artisan-option .equipment-score b {
+  color: #c9d8d5;
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.tier-gold .equipment-score svg,
+.tier-gold .equipment-score b,
+.is-gilded .equipment-score svg,
+.is-gilded .equipment-score b {
+  color: #e2bd69;
+}
+
+.tier-dark-gold .equipment-score svg,
+.tier-dark-gold .equipment-score b {
+  color: #eca15a;
+}
+
+.tier-purple .equipment-score svg,
+.tier-purple .equipment-score b {
+  color: #d39aee;
+}
+
+.slot-equipment-score {
+  grid-column: 2;
+  align-self: start;
+}
+
+.bag-slot .slot-equipment-score svg {
+  grid-row: auto;
+  align-self: auto;
+  width: 10px;
+  height: 10px;
+}
+
+.artisan-option {
+  min-height: 70px;
+}
+
+.artisan-detail-score {
+  grid-column: 2;
+  margin-top: 2px;
+}
+
+.equipment-value > span:last-child {
+  margin-top: 2px;
+}
+
+.warehouse-equipped-row {
+  position: relative;
+  min-height: 76px;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: start;
+  padding: 10px;
+}
+
+.warehouse-equipped-row > svg {
+  margin-top: 3px;
+}
+
+.warehouse-card-copy {
+  min-width: 0;
+  padding-right: 72px;
+}
+
+.warehouse-card-copy > strong {
+  overflow: visible;
+  white-space: normal;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.warehouse-card-score {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  margin: 0;
+}
+
+.town-vault-item {
+  height: auto;
+  min-height: 88px;
+}
+
+.town-vault-item.has-affix {
+  height: auto;
+}
+
+.town-vault-equip {
+  min-height: 86px;
+  grid-template-columns: 25px minmax(0, 1fr);
+  align-items: start;
+  padding: 10px 34px 10px 10px;
+}
+
+.town-vault-equip > svg {
+  margin-top: 3px;
+}
+
+.town-vault-item .warehouse-card-score {
+  right: 34px;
+  z-index: 1;
+}
+
+.warehouse-attributes,
+.warehouse-equipped-row .warehouse-attributes,
+.town-vault-equip .warehouse-attributes {
+  display: block;
+  margin-top: 5px;
+}
+
+.warehouse-equipped-row > .warehouse-attributes {
+  grid-column: 1 / -1;
+}
+
+.warehouse-attribute,
+.warehouse-equipped-row .warehouse-attribute,
+.town-vault-equip .warehouse-attribute {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.warehouse-attribute small,
+.warehouse-attribute b,
+.warehouse-equipped-row .warehouse-attribute small,
+.warehouse-equipped-row .warehouse-attribute b,
+.town-vault-equip .warehouse-attribute small,
+.town-vault-equip .warehouse-attribute b {
+  display: inline;
+  min-width: 0;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.warehouse-attribute small,
+.warehouse-equipped-row .warehouse-attribute small,
+.town-vault-equip .warehouse-attribute small {
+  color: #78837f;
+  flex: 0 0 auto;
+  font-size: 8px;
+  font-weight: 500;
+}
+
+.warehouse-attribute small::after {
+  content: '：';
+}
+
+.warehouse-attribute b,
+.warehouse-equipped-row .warehouse-attribute b,
+.town-vault-equip .warehouse-attribute b {
+  margin-top: 0;
+  color: #cbd2ce;
+  font-size: 8px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.warehouse-attribute.is-affix b {
+  color: #dca05e;
+}
+
+.warehouse-attribute.is-set {
+  display: flex;
+}
+
+.warehouse-attribute.is-set b {
+  color: #c997e2;
+}
+
+.warehouse-equipped-status {
+  width: max-content;
+  margin-top: 4px;
+  color: #a8c97d !important;
+  font-size: 8px !important;
+  font-style: normal;
+  font-weight: 760;
+}
+
 .bag-slot small {
   grid-column: 2;
   align-self: start;
@@ -3002,6 +3228,16 @@ footer {
 
   .warehouse-storage {
     padding-top: 12px;
+  }
+
+  .warehouse-attributes,
+  .warehouse-equipped-row .warehouse-attributes,
+  .town-vault-equip .warehouse-attributes {
+    grid-template-columns: 1fr;
+  }
+
+  .warehouse-attribute.is-set {
+    grid-column: 1;
   }
 
   .region-map-options {
