@@ -21,6 +21,11 @@ import {
   type LootAnimationDetail,
   type UiState,
 } from './game/types';
+import {
+  createSaveBackup,
+  parseSaveBackup,
+  restoreSaveBackup,
+} from './game/saveTransfer';
 
 const getElement = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -51,6 +56,13 @@ const muteButton = getElement<HTMLButtonElement>('mute-button');
 const restartButton = getElement<HTMLButtonElement>('restart-button');
 const startButton = getElement<HTMLButtonElement>('start-button');
 const startLabel = getElement('start-label');
+const saveButton = getElement<HTMLButtonElement>('save-button');
+const saveModal = getElement('save-modal');
+const dismissSaveButton = getElement<HTMLButtonElement>('dismiss-save-button');
+const exportSaveButton = getElement<HTMLButtonElement>('export-save-button');
+const importSaveButton = getElement<HTMLButtonElement>('import-save-button');
+const saveFileInput = getElement<HTMLInputElement>('save-file-input');
+const saveStatus = getElement('save-status');
 const runModal = getElement('run-modal');
 const modalKicker = getElement('modal-kicker');
 const modalTitle = getElement('modal-title');
@@ -109,6 +121,52 @@ const TINY_DUNGEON_SHEET = `${import.meta.env.BASE_URL}assets/kenney-tiny-dungeo
 
 function sendCommand(command: GameCommand): void {
   window.dispatchEvent(new CustomEvent<GameCommand>(COMMAND_EVENT, { detail: command }));
+}
+
+function openSaveManager(): void {
+  saveStatus.textContent = '当前洞窟内尚未带回的物品不属于永久存档';
+  saveStatus.classList.remove('is-error');
+  saveModal.hidden = false;
+  createIcons({ icons });
+}
+
+function closeSaveManager(): void {
+  saveModal.hidden = true;
+  saveFileInput.value = '';
+}
+
+function exportSave(): void {
+  const backup = createSaveBackup(localStorage);
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  const date = backup.exportedAt.slice(0, 10);
+  anchor.href = url;
+  anchor.download = `深渊拾荒者-存档-${date}.json`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  saveStatus.textContent = `存档已导出 · ${date}`;
+  saveStatus.classList.remove('is-error');
+}
+
+async function importSave(file: File): Promise<void> {
+  try {
+    const parsed = JSON.parse(await file.text()) as unknown;
+    const backup = parseSaveBackup(parsed);
+    if (!backup) throw new Error('存档文件格式或版本不正确');
+    const exportedAt = new Date(backup.exportedAt).toLocaleString('zh-CN');
+    const confirmed = window.confirm(`将使用 ${exportedAt} 的备份覆盖本浏览器现有进度。是否继续？`);
+    if (!confirmed) return;
+    restoreSaveBackup(localStorage, backup);
+    window.location.reload();
+  } catch (error) {
+    saveStatus.textContent = error instanceof Error ? error.message : '无法读取存档文件';
+    saveStatus.classList.add('is-error');
+  } finally {
+    saveFileInput.value = '';
+  }
 }
 
 function iconForItem(item: Item): string {
@@ -837,6 +895,14 @@ heroicRegionModeButton.addEventListener('click', () => sendCommand({ action: 'se
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));
 confirmDiscardButton.addEventListener('click', () => sendCommand({ action: 'confirm-discard' }));
+saveButton.addEventListener('click', openSaveManager);
+dismissSaveButton.addEventListener('click', closeSaveManager);
+exportSaveButton.addEventListener('click', exportSave);
+importSaveButton.addEventListener('click', () => saveFileInput.click());
+saveFileInput.addEventListener('change', () => {
+  const file = saveFileInput.files?.[0];
+  if (file) void importSave(file);
+});
 
 document.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((button) => {
   button.addEventListener('click', () => {

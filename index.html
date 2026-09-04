@@ -39,6 +39,9 @@
         </div>
 
         <div class="toolbar">
+          <button id="save-button" class="icon-button" type="button" title="存档管理" aria-label="存档管理">
+            <i data-lucide="database-backup" aria-hidden="true"></i>
+          </button>
           <button id="mute-button" class="icon-button" type="button" title="切换声音" aria-label="切换声音">
             <i data-lucide="volume-2" aria-hidden="true"></i>
           </button>
@@ -197,6 +200,26 @@
                   丢弃
                 </button>
               </div>
+            </div>
+            <div id="save-modal" class="save-modal" hidden role="dialog" aria-modal="true" aria-labelledby="save-title">
+              <button id="dismiss-save-button" class="modal-close" type="button" aria-label="关闭存档管理">
+                <i data-lucide="x" aria-hidden="true"></i>
+              </button>
+              <div class="gilding-emblem save-emblem"><i data-lucide="database-backup" aria-hidden="true"></i></div>
+              <p>永久进度备份</p>
+              <h2 id="save-title">存档管理</h2>
+              <div class="save-actions">
+                <button id="export-save-button" type="button">
+                  <i data-lucide="download" aria-hidden="true"></i>
+                  <span>导出存档</span>
+                </button>
+                <button id="import-save-button" type="button">
+                  <i data-lucide="upload" aria-hidden="true"></i>
+                  <span>导入存档</span>
+                </button>
+              </div>
+              <input id="save-file-input" type="file" accept="application/json,.json" hidden />
+              <small id="save-status" class="save-status" role="status">当前洞窟内尚未带回的物品不属于永久存档</small>
             </div>
             <div id="run-modal" class="run-modal is-visible" role="dialog" aria-modal="true">
               <div class="modal-emblem"><i data-lucide="lamp-wall-up" aria-hidden="true"></i></div>

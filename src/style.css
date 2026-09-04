@@ -269,7 +269,8 @@ button:focus-visible {
 .bestiary-modal[hidden],
 .region-map-modal[hidden],
 .merchant-modal[hidden],
-.discard-modal[hidden] {
+.discard-modal[hidden],
+.save-modal[hidden] {
   display: none;
 }
 
@@ -278,7 +279,8 @@ button:focus-visible {
 .artisan-modal,
 .bestiary-modal,
 .region-map-modal,
-.merchant-modal {
+.merchant-modal,
+.save-modal {
   position: absolute;
   inset: 0;
   z-index: 7;
@@ -395,7 +397,9 @@ button:focus-visible {
 .region-map-modal > p,
 .region-map-modal > h2,
 .merchant-modal > p,
-.merchant-modal > h2 {
+.merchant-modal > h2,
+.save-modal > p,
+.save-modal > h2 {
   margin: 0;
 }
 
@@ -404,7 +408,8 @@ button:focus-visible {
 .artisan-modal > p,
 .bestiary-modal > p,
 .region-map-modal > p,
-.merchant-modal > p {
+.merchant-modal > p,
+.save-modal > p {
   color: var(--gold);
   font-size: 10px;
   font-weight: 760;
@@ -415,7 +420,8 @@ button:focus-visible {
 .artisan-modal > h2,
 .bestiary-modal > h2,
 .region-map-modal > h2,
-.merchant-modal > h2 {
+.merchant-modal > h2,
+.save-modal > h2 {
   margin-top: 5px;
   font-size: 25px;
 }
@@ -461,6 +467,57 @@ button:focus-visible {
 .gilding-emblem svg {
   width: 24px;
   height: 24px;
+}
+
+.save-emblem {
+  border-color: #54706a;
+  color: #9fc8ba;
+  background: #1b2825;
+  box-shadow: 0 0 24px rgba(159, 200, 186, 0.12);
+}
+
+.save-actions {
+  width: min(420px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.save-actions button {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #54706a;
+  border-radius: 4px;
+  color: #dcebe5;
+  background: #1b2825;
+  cursor: pointer;
+}
+
+.save-actions button:hover {
+  border-color: #9fc8ba;
+  background: #21332e;
+}
+
+.save-actions svg {
+  width: 17px;
+  height: 17px;
+}
+
+.save-status {
+  min-height: 16px;
+  margin-top: 14px;
+  color: #8f9b97;
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.save-status.is-error {
+  color: #ef8b83;
 }
 
 .gilding-options {
@@ -3177,6 +3234,7 @@ footer {
   .bestiary-modal,
   .region-map-modal,
   .merchant-modal,
+  .save-modal,
   .discard-modal {
     padding: 18px;
   }
