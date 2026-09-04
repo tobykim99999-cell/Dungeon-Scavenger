@@ -363,6 +363,7 @@ button:focus-visible {
 .region-map-modal[hidden],
 .merchant-modal[hidden],
 .discard-modal[hidden],
+.boss-exit-modal[hidden],
 .save-modal[hidden] {
   display: none;
 }
@@ -373,6 +374,7 @@ button:focus-visible {
 .bestiary-modal,
 .region-map-modal,
 .merchant-modal,
+.boss-exit-modal,
 .save-modal {
   position: absolute;
   inset: 0;
@@ -611,6 +613,51 @@ button:focus-visible {
 
 .save-status.is-error {
   color: #ef8b83;
+}
+
+.boss-exit-modal {
+  text-align: center;
+}
+
+.boss-exit-modal > p,
+.boss-exit-modal > h2 {
+  margin: 0;
+}
+
+.boss-exit-modal > p {
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.boss-exit-modal > h2 {
+  margin-top: 5px;
+  font-size: 25px;
+}
+
+.boss-exit-emblem {
+  border-color: #657c69;
+  color: #b9d2b4;
+  background: #1d2820;
+}
+
+.boss-exit-actions {
+  width: min(440px, 100%);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.boss-exit-actions button {
+  width: 100%;
+  min-height: 46px;
+  margin: 0;
+}
+
+.boss-exit-actions svg {
+  width: 16px;
+  height: 16px;
 }
 
 .gilding-options {
@@ -2269,6 +2316,83 @@ button:focus-visible {
   padding-top: 20px;
 }
 
+.skills-section[hidden] {
+  display: none;
+}
+
+.skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.skill-button {
+  min-width: 0;
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid #3d494c;
+  border-radius: 4px;
+  color: #dce2df;
+  background: #192024;
+  text-align: left;
+  cursor: pointer;
+}
+
+.skill-button:hover:not(:disabled) {
+  border-color: #7db6c4;
+  background: #202c31;
+}
+
+.skill-button:disabled {
+  color: #717b79;
+  background: #171b1d;
+  cursor: not-allowed;
+}
+
+.skill-button.is-active {
+  border-color: #d5af58;
+  color: #f4dfac;
+  background: #292416;
+  box-shadow: inset 0 0 0 1px rgba(225, 184, 92, 0.12);
+}
+
+.skill-button > svg {
+  width: 22px;
+  height: 22px;
+  justify-self: center;
+}
+
+.skill-button > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.skill-button strong,
+.skill-button small {
+  min-width: 0;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.skill-button strong {
+  font-size: 11px;
+}
+
+.skill-button small {
+  color: #8d9a97;
+  font-size: 9px;
+}
+
+.skill-button.is-active small {
+  color: #d5bd80;
+}
+
 .section-heading {
   min-height: 26px;
   display: flex;
@@ -3366,6 +3490,7 @@ footer {
   .bestiary-modal,
   .region-map-modal,
   .merchant-modal,
+  .boss-exit-modal,
   .save-modal,
   .discard-modal {
     padding: 18px;

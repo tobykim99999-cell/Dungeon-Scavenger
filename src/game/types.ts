@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import type { BossSkillId } from './bossSkills';
+import type { PlayerSkillId } from './playerSkills';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
 export type AdventureMode = 'normal' | 'heroic';
@@ -278,6 +279,8 @@ export interface UiState {
   playerControlTurns: number;
   playerBurnTurns: number;
   playerBurnDamage: number;
+  playerSkills: PlayerSkillState[];
+  bossExitChoice: boolean;
   boss: {
     name: string;
     hp: number;
@@ -291,6 +294,17 @@ export interface UiState {
   } | null;
 }
 
+export interface PlayerSkillState {
+  id: PlayerSkillId;
+  name: string;
+  description: string;
+  cooldown: number;
+  maxCooldown: number;
+  ready: boolean;
+  active: boolean;
+  blocked: boolean;
+}
+
 export type GameCommand =
   | { action: 'start' }
   | { action: 'enter-town' }
@@ -298,6 +312,10 @@ export type GameCommand =
   | { action: 'use-item'; index: number }
   | { action: 'escape' }
   | { action: 'return-town' }
+  | { action: 'use-skill'; skillId: PlayerSkillId }
+  | { action: 'continue-after-boss' }
+  | { action: 'return-after-boss' }
+  | { action: 'dismiss-boss-exit-choice' }
   | { action: 'gild-item'; targetId: string }
   | { action: 'dismiss-gilding' }
   | { action: 'equip-town'; targetId: string }

@@ -105,6 +105,16 @@ import {
 } from './progression';
 import { getRegionTheme } from './themes';
 import {
+  PLAYER_SKILLS,
+  createPlayerSkillCooldowns,
+  getChargedStrikeDamage,
+  getGuardedDamage,
+  getShockwaveDamage,
+  tickPlayerSkillCooldowns,
+  type PlayerSkillCooldowns,
+  type PlayerSkillId,
+} from './playerSkills';
+import {
   getRegion,
   getRegionIndex,
   parseRegionProgress,
@@ -183,6 +193,14 @@ interface BossSummonProfile {
   defenseRatio: number;
 }
 
+type BgmKey = 'bgm-town' | 'bgm-dungeon' | 'bgm-boss';
+
+const BGM_VOLUMES: Record<BgmKey, number> = {
+  'bgm-town': 0.13,
+  'bgm-dungeon': 0.1,
+  'bgm-boss': 0.16,
+};
+
 const VOID_SUMMON_PROFILE: BossSummonProfile = {
   name: '虚空侍从',
   tint: 0x9b78e8,
@@ -225,6 +243,7 @@ export class GameScene extends Phaser.Scene {
   private visible = new Set<string>();
   private bossStage = false;
   private bossDefeated = true;
+  private bossExitChoice = false;
   private altarFloors = new Map<number, Set<number>>();
   private gildingOptions: GildingOption[] | null = null;
   private pendingGilded: PendingGildedEquipment[] = [];
@@ -253,6 +272,9 @@ export class GameScene extends Phaser.Scene {
   private playerControlTurns = 0;
   private playerBurnTurns = 0;
   private playerBurnDamage = 0;
+  private playerSkillCooldowns: PlayerSkillCooldowns = createPlayerSkillCooldowns();
+  private chargedStrikeReady = false;
+  private guardReady = false;
 
   private mapGroup!: Phaser.GameObjects.Group;
   private objectGroup!: Phaser.GameObjects.Group;
@@ -263,6 +285,9 @@ export class GameScene extends Phaser.Scene {
   private bossSkillGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Sprite;
   private playerControlEffect?: Phaser.GameObjects.Container;
+  private currentBgm?: Phaser.Sound.BaseSound;
+  private currentBgmKey?: BgmKey;
+  private bgmPaused = false;
   private exitSprite!: Phaser.GameObjects.Sprite;
   private autoMoveTarget?: Point;
   private autoCombatTargetId?: string;
@@ -276,6 +301,9 @@ export class GameScene extends Phaser.Scene {
     this.handleCommand((event as CustomEvent<GameCommand>).detail);
   };
   private readonly blurListener = () => this.stopHeldMovement();
+  private readonly resumeBgm = () => {
+    if (this.currentBgm && !this.currentBgm.isPlaying && !this.bgmPaused) this.currentBgm.play();
+  };
 
   constructor() {
     super('GameScene');
@@ -291,6 +319,9 @@ export class GameScene extends Phaser.Scene {
     this.load.audio('coins', `${ASSET_ROOT}/kenney-rpg-audio/Audio/handleCoins.ogg`);
     this.load.audio('open', `${ASSET_ROOT}/kenney-rpg-audio/Audio/doorOpen_2.ogg`);
     this.load.audio('equip', `${ASSET_ROOT}/kenney-rpg-audio/Audio/clothBelt2.ogg`);
+    this.load.audio('bgm-town', `${ASSET_ROOT}/music/town-tavern.ogg`);
+    this.load.audio('bgm-dungeon', `${ASSET_ROOT}/music/dungeon-spooky.ogg`);
+    this.load.audio('bgm-boss', `${ASSET_ROOT}/music/boss-battle.ogg`);
   }
 
   create(): void {
@@ -305,6 +336,7 @@ export class GameScene extends Phaser.Scene {
     this.bossSkillGraphics = this.add.graphics().setDepth(18);
     this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
     this.heroicUnlocked = parseHeroicUnlock(localStorage.getItem(HEROIC_UNLOCK_KEY));
+    this.sound.on(Phaser.Sound.Events.UNLOCKED, this.resumeBgm);
 
     this.bindKeyboard();
     this.bindPointer();
@@ -313,6 +345,9 @@ export class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       window.removeEventListener(COMMAND_EVENT, this.commandListener);
       window.removeEventListener('blur', this.blurListener);
+      this.sound.off(Phaser.Sound.Events.UNLOCKED, this.resumeBgm);
+      this.currentBgm?.stop();
+      this.currentBgm?.destroy();
       this.stopHeldMovement();
     });
 
@@ -346,11 +381,21 @@ export class GameScene extends Phaser.Scene {
         this.handleCommand({ action: 'use-item', index: Number(event.code.slice(-1)) - 1 });
       } else if (event.code === 'Digit0') {
         this.handleCommand({ action: 'use-item', index: 9 });
+      } else if (event.code === 'KeyQ') {
+        this.handleCommand({ action: 'use-skill', skillId: 'charged-strike' });
+      } else if (event.code === 'KeyR') {
+        this.handleCommand({ action: 'use-skill', skillId: 'guard' });
+      } else if (event.code === 'KeyF') {
+        this.handleCommand({ action: 'use-skill', skillId: 'shockwave' });
+      } else if (event.code === 'KeyC') {
+        this.handleCommand({ action: 'use-skill', skillId: 'cleanse' });
       } else if (event.code === 'KeyE') {
         this.handleCommand({ action: 'escape' });
       } else if (event.code === 'Escape') {
         this.handleCommand({
-          action: this.enhancementConfirmation
+          action: this.bossExitChoice
+            ? 'dismiss-boss-exit-choice'
+            : (this.enhancementConfirmation
             ? 'dismiss-enhancement-confirmation'
             : (this.discardCandidate
             ? 'dismiss-discard'
@@ -362,7 +407,7 @@ export class GameScene extends Phaser.Scene {
             ? 'dismiss-bestiary'
             : (this.regionOptions
             ? 'dismiss-region-map'
-            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding')))))),
+            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))))))),
         });
       }
     });
@@ -442,6 +487,7 @@ export class GameScene extends Phaser.Scene {
       !this.artisanOptions &&
       !this.bestiaryRegions &&
       !this.regionOptions &&
+      !this.bossExitChoice &&
       !this.townLoadoutOptions &&
       !this.gildingOptions;
   }
@@ -597,6 +643,11 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (command.action === 'enter-town') {
+      if (this.status === 'active' && this.bossStage && !this.bossDefeated) {
+        this.pushLog('守层者封锁了大殿，击败 Boss 前无法放弃远征。');
+        this.emitUiState();
+        return;
+      }
       this.enterTown('本次远征已经放弃。');
       return;
     }
@@ -729,13 +780,38 @@ export class GameScene extends Phaser.Scene {
 
     if (
       this.playerControlTurns > 0 &&
-      (command.action === 'move' || command.action === 'use-item' || command.action === 'escape' || command.action === 'return-town')
+      (
+        command.action === 'move' ||
+        command.action === 'use-item' ||
+        command.action === 'escape' ||
+        command.action === 'return-town' ||
+        (command.action === 'use-skill' && command.skillId !== 'cleanse')
+      )
     ) {
       this.consumePlayerControlTurn();
       return;
     }
+    if (command.action === 'dismiss-boss-exit-choice') {
+      this.bossExitChoice = false;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'continue-after-boss') {
+      this.continueAfterBoss();
+      return;
+    }
+    if (command.action === 'return-after-boss') {
+      if (this.bossExitChoice) {
+        this.bossExitChoice = false;
+        this.returnToTown();
+      }
+      return;
+    }
+    if (this.bossExitChoice) return;
 
-    if (command.action === 'move') {
+    if (command.action === 'use-skill') {
+      this.usePlayerSkill(command.skillId);
+    } else if (command.action === 'move') {
       const directions: Record<MoveDirection, Step> = {
         up: { x: 0, y: -1 },
         down: { x: 0, y: 1 },
@@ -758,6 +834,7 @@ export class GameScene extends Phaser.Scene {
     this.adventureMode = mode;
     this.floor = startFloor;
     this.bossStage = false;
+    this.bossExitChoice = false;
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.loadTownStorage();
@@ -780,6 +857,9 @@ export class GameScene extends Phaser.Scene {
     this.playerControlTurns = 0;
     this.playerBurnTurns = 0;
     this.playerBurnDamage = 0;
+    this.playerSkillCooldowns = createPlayerSkillCooldowns();
+    this.chargedStrikeReady = false;
+    this.guardReady = false;
     this.altarFloors.clear();
     this.logEntries = status === 'active' ? ['铁门在身后合拢。'] : [];
     this.random = createRandom((Date.now() ^ 0xa51b3c7d) >>> 0);
@@ -794,6 +874,7 @@ export class GameScene extends Phaser.Scene {
     this.floor = 1;
     this.bossStage = false;
     this.bossDefeated = true;
+    this.bossExitChoice = false;
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.inventory = [];
@@ -813,6 +894,9 @@ export class GameScene extends Phaser.Scene {
     this.playerControlTurns = 0;
     this.playerBurnTurns = 0;
     this.playerBurnDamage = 0;
+    this.playerSkillCooldowns = createPlayerSkillCooldowns();
+    this.chargedStrikeReady = false;
+    this.guardReady = false;
     this.altarFloors.clear();
     this.loadTownStorage();
     this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
@@ -828,6 +912,7 @@ export class GameScene extends Phaser.Scene {
     this.renderMap();
     this.renderTownObjects();
     this.updateVision();
+    this.switchBgm('bgm-town');
     this.emitUiState();
   }
 
@@ -844,6 +929,7 @@ export class GameScene extends Phaser.Scene {
     this.spawnLevelContent();
     this.renderActorsAndObjects();
     this.updateVision();
+    this.switchBgm(this.bossStage ? 'bgm-boss' : 'bgm-dungeon');
     if (this.bossStage) this.pushLog(`第 ${this.floor} 层守层者正在大殿中等待。`);
     this.emitUiState();
   }
@@ -874,6 +960,7 @@ export class GameScene extends Phaser.Scene {
     this.townArchivistSprite = undefined;
     this.gildingOptions = null;
     this.discardCandidate = null;
+    this.bossExitChoice = false;
   }
 
   private renderMap(): void {
@@ -1337,6 +1424,19 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
+    if (
+      target.x === this.dungeon.exit.x &&
+      target.y === this.dungeon.exit.y &&
+      this.bossStage &&
+      this.bossDefeated
+    ) {
+      this.cancelAutoMove();
+      this.stopHeldMovement();
+      this.bossExitChoice = true;
+      this.emitUiState();
+      return;
+    }
+
     this.player.x = target.x;
     this.player.y = target.y;
     this.tweenToGrid(this.playerSprite, target);
@@ -1363,13 +1463,107 @@ export class GameScene extends Phaser.Scene {
     this.finishTurn();
   }
 
-  private finishTurn(): void {
+  private finishTurn(excludedSkill?: PlayerSkillId): void {
+    this.playerSkillCooldowns = tickPlayerSkillCooldowns(this.playerSkillCooldowns, excludedSkill);
     this.applyPlayerBurnTurn();
     if (this.status === 'dead') return;
     this.updateVision();
     this.runEnemyTurns();
     this.updateVision();
     this.emitUiState();
+  }
+
+  private usePlayerSkill(skillId: PlayerSkillId): void {
+    const skill = PLAYER_SKILLS.find((candidate) => candidate.id === skillId)!;
+    if (this.playerSkillCooldowns[skillId] > 0) {
+      this.pushLog(`${skill.name}还需冷却 ${this.playerSkillCooldowns[skillId]} 回合。`);
+      this.emitUiState();
+      return;
+    }
+
+    if (skillId === 'charged-strike') {
+      if (this.chargedStrikeReady) return;
+      this.chargedStrikeReady = true;
+      this.playerSkillCooldowns[skillId] = skill.cooldown;
+      this.showStatusText(this.player.x, this.player.y, '蓄力斩就绪', '#f5d278');
+      this.pushLog('你开始蓄力，下一次近战攻击将无视部分防御并造成额外伤害。');
+      this.playSound('equip', 0.4);
+      this.finishTurn(skillId);
+      return;
+    }
+
+    if (skillId === 'guard') {
+      if (this.guardReady) return;
+      this.guardReady = true;
+      this.playerSkillCooldowns[skillId] = skill.cooldown;
+      this.showStatusText(this.player.x, this.player.y, '架盾', '#9fc8df');
+      this.playerSprite.setTintFill(0x9fc8df);
+      this.time.delayedCall(120, () => this.playerSprite.clearTint());
+      this.pushLog('你架起防御，下一次直接伤害减半并抵挡附带控制。');
+      this.finishTurn(skillId);
+      return;
+    }
+
+    if (skillId === 'shockwave') {
+      this.useShockwave(skill.cooldown);
+      return;
+    }
+
+    if (this.playerControlTurns <= 0 && this.playerBurnTurns <= 0) {
+      this.pushLog('当前没有可以净化的禁锢或灼烧。');
+      this.emitUiState();
+      return;
+    }
+    this.playerControlTurns = 0;
+    this.playerBurnTurns = 0;
+    this.playerBurnDamage = 0;
+    this.destroyPlayerControlEffect();
+    this.playerSkillCooldowns[skillId] = skill.cooldown;
+    this.showStatusText(this.player.x, this.player.y, '净化', '#a9edcf');
+    this.cameras.main.flash(140, 92, 150, 128, false);
+    this.pushLog('你净化了身上的禁锢与灼烧。');
+    this.finishTurn(skillId);
+  }
+
+  private useShockwave(cooldown: number): void {
+    const targets = this.enemies.filter((enemy) => this.distance(enemy, this.player) === 1);
+    if (targets.length === 0) {
+      this.pushLog('周围没有可以被震荡波命中的敌人。');
+      this.emitUiState();
+      return;
+    }
+
+    const wave = this.add
+      .circle(this.player.x * TILE_SIZE + 16, this.player.y * TILE_SIZE + 16, 18, 0x78c9dd, 0.12)
+      .setStrokeStyle(3, 0xbcefff, 0.92)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(29);
+    this.tweens.add({
+      targets: wave,
+      scaleX: 2.8,
+      scaleY: 2.8,
+      alpha: 0,
+      duration: 420,
+      onComplete: () => wave.destroy(),
+    });
+
+    for (const enemy of targets) {
+      if (!this.enemies.some((candidate) => candidate.id === enemy.id)) continue;
+      if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
+        this.showStatusText(enemy.x, enemy.y, '无敌', '#ffd078');
+        continue;
+      }
+      const damage = getShockwaveDamage(this.totalAttack, enemy.defense);
+      const result = this.applyDamageToEnemy(enemy, damage);
+      if (result.absorbed > 0) this.showDamage(enemy.x, enemy.y, result.absorbed, 'shield');
+      if (result.healthDamage > 0) this.showDamage(enemy.x, enemy.y, result.healthDamage, 'normal');
+      enemy.alerted = true;
+      if (enemy.hp <= 0) this.defeatEnemy(enemy);
+    }
+    this.playerSkillCooldowns.shockwave = cooldown;
+    this.playSound('hit', 0.55);
+    this.pushLog(`震荡波命中了 ${targets.length} 个目标。`);
+    this.finishTurn('shockwave');
   }
 
   private attackEnemy(enemy: Enemy): void {
@@ -1380,10 +1574,16 @@ export class GameScene extends Phaser.Scene {
       this.pushLog(`${enemy.name}正在熔火再生，当前攻击无法造成伤害。`);
       return;
     }
+
     const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
-    const baseDamage = Math.max(1, this.totalAttack - enemy.defense + this.random.integer(-1, 1));
+    const variance = this.random.integer(-1, 1);
     const critical = setBonus?.stat === 'crit' && shouldCriticalHit(setBonus.value, this.random.next());
-    const damage = critical ? baseDamage * 2 : baseDamage;
+    const chargedStrike = this.chargedStrikeReady;
+    const baseDamage = Math.max(1, this.totalAttack - enemy.defense + variance);
+    const damage = chargedStrike
+      ? getChargedStrikeDamage(this.totalAttack, enemy.defense, variance, critical)
+      : (critical ? baseDamage * 2 : baseDamage);
+    this.chargedStrikeReady = false;
     const result = this.applyDamageToEnemy(enemy, damage);
     this.playSound('hit', 0.42);
     if (result.absorbed > 0) this.showDamage(enemy.x, enemy.y, result.absorbed, 'shield');
@@ -1399,7 +1599,7 @@ export class GameScene extends Phaser.Scene {
     if (enemy.hp > 0) {
       const shieldMessage = result.absorbed > 0 ? `，护盾吸收 ${result.absorbed} 点` : '';
       const healthMessage = result.healthDamage > 0 ? `，生命受到 ${result.healthDamage} 点伤害` : '';
-      this.pushLog(`${critical ? '暴击！' : ''}你击中${enemy.name}${shieldMessage}${healthMessage}。`);
+      this.pushLog(`${chargedStrike ? '蓄力斩！' : ''}${critical ? '暴击！' : ''}你击中${enemy.name}${shieldMessage}${healthMessage}。`);
       if (setBonus?.stat === 'bleed') {
         enemy.bleedDamage = setBonus.value;
         enemy.bleedTurns = 2;
@@ -1428,6 +1628,7 @@ export class GameScene extends Phaser.Scene {
     this.playSound('coins', 0.28);
 
     if (enemy.isBoss) {
+      this.pauseBgm();
       this.tweens.killTweensOf(this.bossSkillGraphics);
       this.bossSkillGraphics.clear().setAlpha(1);
       this.bossDefeated = true;
@@ -1526,30 +1727,38 @@ export class GameScene extends Phaser.Scene {
       this.random.integer(0, 1),
       enemy.isBoss,
     );
-    this.damagePlayer(damage, `${enemy.name}对你造成 ${damage} 点伤害。`, 'player');
+    this.damagePlayer(damage, (actualDamage) => `${enemy.name}对你造成 ${actualDamage} 点伤害。`, 'player');
   }
 
   private damagePlayer(
     damage: number,
-    message: string,
+    message: string | ((actualDamage: number) => string),
     type: 'player' | 'boss-skill' | 'burn',
     label = '',
-  ): void {
-    this.player.hp -= damage;
-    this.pushLog(message);
-    this.showDamage(this.player.x, this.player.y, damage, type, label);
+  ): { damage: number; guarded: boolean } {
+    const guarded = this.guardReady && type !== 'burn';
+    const actualDamage = guarded ? getGuardedDamage(damage) : damage;
+    if (guarded) {
+      this.guardReady = false;
+      this.showStatusText(this.player.x, this.player.y, `格挡 ${damage - actualDamage}`, '#9fc8df');
+      this.pushLog(`架盾抵消了 ${damage - actualDamage} 点伤害。`);
+    }
+    this.player.hp -= actualDamage;
+    this.pushLog(typeof message === 'function' ? message(actualDamage) : message);
+    this.showDamage(this.player.x, this.player.y, actualDamage, type, label);
     const skillHit = type === 'boss-skill';
     this.cameras.main.shake(skillHit ? 180 : 80, skillHit ? 0.006 : 0.0025);
     this.playerSprite.setTintFill(type === 'burn' ? 0xffa04d : 0xff746c);
     this.time.delayedCall(80, () => this.playerSprite.clearTint());
 
-    if (this.player.hp > 0) return;
+    if (this.player.hp > 0) return { damage: actualDamage, guarded };
     this.player.hp = 0;
     this.status = 'dead';
     this.destroyPlayerControlEffect();
     this.playerSprite.setTint(0x6e7173).setAngle(90);
     this.pushLog('火把熄灭了。本次收获遗落在洞中。');
     this.emitUiState();
+    return { damage: actualDamage, guarded };
   }
 
   private applyFourthBossHitEffects(): void {
@@ -1601,7 +1810,7 @@ export class GameScene extends Phaser.Scene {
     if (this.playerBurnTurns === 0) this.playerBurnDamage = 0;
     this.damagePlayer(
       damage,
-      `灼烧造成 ${damage} 点伤害，剩余 ${this.playerBurnTurns} 回合。`,
+      (actualDamage) => `灼烧造成 ${actualDamage} 点伤害，剩余 ${this.playerBurnTurns} 回合。`,
       'burn',
     );
   }
@@ -1944,9 +2153,15 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const damage = getBossSkillDamage(skill, enemy.attack, this.totalDefense);
-    this.damagePlayer(damage, `「${skill.name}」命中，造成 ${damage} 点伤害。`, 'boss-skill', skill.name);
+    const hitResult = this.damagePlayer(
+      damage,
+      (actualDamage) => `「${skill.name}」命中，造成 ${actualDamage} 点伤害。`,
+      'boss-skill',
+      skill.name,
+    );
     if (this.status !== 'dead' && skill.id === 'meteor' && getRegionIndex(this.floor) === 3) {
-      this.applyFourthBossHitEffects();
+      if (hitResult.guarded) this.pushLog('架盾挡住了陨火附带的禁锢与灼烧。');
+      else this.applyFourthBossHitEffects();
     }
   }
 
@@ -2833,6 +3048,11 @@ export class GameScene extends Phaser.Scene {
 
   private escapeDungeon(): void {
     if (this.status !== 'active') return;
+    if (this.bossStage && !this.bossDefeated) {
+      this.pushLog('守层者封锁了退路，击败 Boss 后才能回城。');
+      this.emitUiState();
+      return;
+    }
     const scrollIndex = this.inventory.findIndex((item) => item.type === 'scroll');
     if (scrollIndex < 0) {
       this.pushLog('行囊里没有逃脱卷轴。');
@@ -3123,6 +3343,18 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
+  private continueAfterBoss(): void {
+    if (!this.bossExitChoice || this.status !== 'active' || !this.bossStage || !this.bossDefeated) return;
+    this.bossExitChoice = false;
+    const nextStage = advanceStage(this.floor, true);
+    this.floor = nextStage.floor;
+    this.bossStage = nextStage.bossStage;
+    this.player.hp = Math.min(this.totalMaxHp, this.player.hp + 3);
+    this.pushLog(`你离开守层大殿，进入第 ${this.floor} 层。`);
+    this.playSound('open', 0.42);
+    this.buildLevel();
+  }
+
   private showStatusText(x: number, y: number, message: string, color: string): void {
     const label = this.add
       .text(x * TILE_SIZE + 16, y * TILE_SIZE - 5, message, {
@@ -3154,6 +3386,28 @@ export class GameScene extends Phaser.Scene {
 
   private playSound(key: string, volume: number): void {
     this.sound.play(key, { volume });
+  }
+
+  private switchBgm(key: BgmKey): void {
+    this.bgmPaused = false;
+    if (this.currentBgmKey === key) {
+      if (this.currentBgm?.isPaused) this.currentBgm.resume();
+      else if (this.currentBgm && !this.currentBgm.isPlaying && !this.sound.locked) this.currentBgm.play();
+      return;
+    }
+    this.currentBgm?.stop();
+    this.currentBgm?.destroy();
+    this.currentBgmKey = key;
+    this.currentBgm = this.sound.add(key, {
+      loop: true,
+      volume: BGM_VOLUMES[key],
+    });
+    if (!this.sound.locked) this.currentBgm.play();
+  }
+
+  private pauseBgm(): void {
+    this.bgmPaused = true;
+    if (this.currentBgm?.isPlaying) this.currentBgm.pause();
   }
 
   private shuffle<T>(items: T[]): void {
@@ -3217,6 +3471,21 @@ export class GameScene extends Phaser.Scene {
       playerControlTurns: this.playerControlTurns,
       playerBurnTurns: this.playerBurnTurns,
       playerBurnDamage: this.playerBurnDamage,
+      playerSkills: PLAYER_SKILLS.map((skill) => {
+        const active = skill.id === 'charged-strike'
+          ? this.chargedStrikeReady
+          : skill.id === 'guard' && this.guardReady;
+        const blocked = this.playerControlTurns > 0 && skill.id !== 'cleanse';
+        return {
+          ...skill,
+          cooldown: this.playerSkillCooldowns[skill.id],
+          maxCooldown: skill.cooldown,
+          ready: this.status === 'active' && this.playerSkillCooldowns[skill.id] === 0 && !active && !blocked,
+          active,
+          blocked,
+        };
+      }),
+      bossExitChoice: this.bossExitChoice,
       boss: boss ? {
         name: boss.name,
         hp: boss.hp,

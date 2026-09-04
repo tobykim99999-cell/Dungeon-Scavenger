@@ -46,6 +46,8 @@ const weaponDetail = getElement('weapon-detail');
 const armorDetail = getElement('armor-detail');
 const setBonus = getElement('set-bonus');
 const bagSection = getElement('bag-section');
+const skillsSection = getElement('skills-section');
+const skillGrid = getElement('skill-grid');
 const bagCount = getElement('bag-count');
 const bagGrid = getElement('bag-grid');
 const logTitle = getElement('log-title');
@@ -123,6 +125,10 @@ const discardKicker = getElement('discard-kicker');
 const discardWarning = getElement('discard-warning');
 const dismissDiscardButton = getElement<HTMLButtonElement>('dismiss-discard-button');
 const confirmDiscardButton = getElement<HTMLButtonElement>('confirm-discard-button');
+const bossExitModal = getElement('boss-exit-modal');
+const dismissBossExitButton = getElement<HTMLButtonElement>('dismiss-boss-exit-button');
+const bossExitReturnButton = getElement<HTMLButtonElement>('boss-exit-return-button');
+const bossExitContinueButton = getElement<HTMLButtonElement>('boss-exit-continue-button');
 let merchantRevealTimer: number | undefined;
 let activeMerchantRevealSequence = 0;
 const TINY_DUNGEON_SHEET = `${import.meta.env.BASE_URL}assets/kenney-tiny-dungeon/Tilemap/tilemap_packed.png`;
@@ -324,6 +330,39 @@ function renderInventory(items: Item[], capacity: number): void {
     }
 
     bagGrid.append(slot);
+  }
+}
+
+function renderPlayerSkills(state: UiState): void {
+  skillsSection.hidden = state.status !== 'active';
+  skillGrid.replaceChildren();
+  const iconsBySkill = {
+    'charged-strike': 'sword',
+    guard: 'shield',
+    shockwave: 'waves',
+    cleanse: 'sparkles',
+  } as const;
+
+  for (const skill of state.playerSkills) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `skill-button${skill.active ? ' is-active' : ''}`;
+    button.disabled = !skill.ready;
+    button.title = skill.description;
+    const status = skill.active
+      ? '已准备'
+      : skill.cooldown > 0
+        ? `冷却 ${skill.cooldown}`
+        : skill.blocked
+          ? '被控制'
+          : '可使用';
+    button.setAttribute('aria-label', `${skill.name}，${skill.description}，${status}`);
+    button.innerHTML = `
+      <i data-lucide="${iconsBySkill[skill.id]}" aria-hidden="true"></i>
+      <span><strong>${skill.name}</strong><small>${status}</small></span>
+    `;
+    button.addEventListener('click', () => sendCommand({ action: 'use-skill', skillId: skill.id }));
+    skillGrid.append(button);
   }
 }
 
@@ -833,6 +872,7 @@ function renderState(state: UiState): void {
   playerBurnEffect.querySelector('b')!.textContent = `灼烧 · ${state.playerBurnTurns} 回合 · ${state.playerBurnDamage}/回合`;
 
   bossEncounter.hidden = !state.boss;
+  bossExitModal.hidden = !state.bossExitChoice;
   if (state.boss) {
     bossName.textContent = state.boss.secondPhase ? `${state.boss.name} · 二阶段` : state.boss.name;
     bossEncounter.classList.toggle('is-second-phase', state.boss.secondPhase);
@@ -865,6 +905,7 @@ function renderState(state: UiState): void {
   renderMerchant(state);
   renderDiscard(state);
   renderInventory(state.inventory, state.inventoryCapacity);
+  renderPlayerSkills(state);
   gildedStatus.replaceChildren(
     ...state.pendingGilded.map((equipment) => {
       const row = document.createElement('span');
@@ -887,7 +928,7 @@ function renderState(state: UiState): void {
   );
 
   const hasScroll = state.inventory.some((item) => item.type === 'scroll');
-  escapeButton.disabled = state.status !== 'active' || !hasScroll;
+  escapeButton.disabled = state.status !== 'active' || !hasScroll || (state.isBossFloor && !state.canReturnToTown);
   returnTownButton.hidden = !state.canReturnToTown;
   muteButton.innerHTML = `<i data-lucide="${state.muted ? 'volume-x' : 'volume-2'}" aria-hidden="true"></i>`;
   muteButton.setAttribute('aria-label', state.muted ? '开启声音' : '关闭声音');
@@ -921,6 +962,9 @@ heroicRegionModeButton.addEventListener('click', () => sendCommand({ action: 'se
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));
 confirmDiscardButton.addEventListener('click', () => sendCommand({ action: 'confirm-discard' }));
+dismissBossExitButton.addEventListener('click', () => sendCommand({ action: 'dismiss-boss-exit-choice' }));
+bossExitReturnButton.addEventListener('click', () => sendCommand({ action: 'return-after-boss' }));
+bossExitContinueButton.addEventListener('click', () => sendCommand({ action: 'continue-after-boss' }));
 saveButton.addEventListener('click', openSaveManager);
 dismissSaveButton.addEventListener('click', closeSaveManager);
 exportSaveButton.addEventListener('click', exportSave);
