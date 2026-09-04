@@ -1,5 +1,6 @@
 import type Phaser from 'phaser';
 import type { BossSkillId } from './bossSkills';
+import type { EliteAffix } from './elite';
 import type { PlayerSkillId } from './playerSkills';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
@@ -227,6 +228,10 @@ export interface Enemy {
   maxShield?: number;
   shieldEffect?: Phaser.GameObjects.Arc;
   summonedByBoss?: boolean;
+  elite?: boolean;
+  eliteAffix?: EliteAffix;
+  eliteEnraged?: boolean;
+  eliteEffect?: Phaser.GameObjects.Container;
   sprite?: Phaser.GameObjects.Sprite;
 }
 

@@ -16,6 +16,15 @@ import {
 } from './dungeon';
 import { computeFieldOfView } from './fov';
 import {
+  ELITE_AFFIXES,
+  getEliteBulwarkShield,
+  getEliteFrenzyAttack,
+  getEliteLifeSteal,
+  getEliteStats,
+  rollEliteAffix,
+  shouldSpawnHeroicElite,
+} from './elite';
+import {
   FOURTH_BOSS_BURN_TURNS,
   FOURTH_BOSS_CONTROL_TURNS,
   FOURTH_BOSS_HEAL_TURNS,
@@ -944,6 +953,7 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       this.destroyBossShield(enemy);
       this.destroyBossHealingEffect(enemy);
+      this.destroyEliteEffect(enemy);
     }
     this.mapGroup?.clear(true, true);
     this.objectGroup?.clear(true, true);
@@ -1258,6 +1268,10 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
+    if (shouldSpawnHeroicElite(this.adventureMode, this.floor) && positions.length > 0) {
+      this.spawnHeroicElite(positions.pop()!);
+    }
+
     const chestCount = getChestCount(this.floor);
     const shouldOfferEscapeScroll = shouldPlaceEscapeScroll(
       this.floor,
@@ -1280,6 +1294,38 @@ export class GameScene extends Phaser.Scene {
       const position = positions.pop()!;
       this.altar = { x: position.x, y: position.y, used: false };
     }
+  }
+
+  private spawnHeroicElite(position: Point): void {
+    const theme = getRegionTheme(this.floor);
+    const template = theme.enemies[this.random.integer(0, theme.enemies.length - 1)];
+    const baseStats = getEnemyStats(template, this.difficultyFloor, 'heroic');
+    const stats = getEliteStats(baseStats);
+    const affix = rollEliteAffix(this.random.next());
+    const elite: Enemy = {
+      id: `elite-${this.floor}-${this.itemSerial++}`,
+      name: `精英·${template.name}`,
+      x: position.x,
+      y: position.y,
+      hp: stats.hp,
+      maxHp: stats.hp,
+      attack: stats.attack,
+      defense: stats.defense,
+      reward: stats.reward,
+      frame: template.frame,
+      tint: template.tint,
+      scale: template.scale * 1.12,
+      alerted: false,
+      isBoss: false,
+      elite: true,
+      eliteAffix: affix.id,
+    };
+    if (affix.id === 'bulwark') {
+      elite.shield = getEliteBulwarkShield(elite.maxHp);
+      elite.maxShield = elite.shield;
+    }
+    this.enemies.push(elite);
+    this.pushLog(`本层出现了「${affix.label}」精英怪。`);
   }
 
   private shouldSpawnAltar(): boolean {
@@ -1337,6 +1383,7 @@ export class GameScene extends Phaser.Scene {
         .setTint(enemy.tint)
         .setDepth(7);
       this.actorGroup.add(enemy.sprite);
+      if (enemy.elite) this.createEliteEffect(enemy);
     }
 
     this.playerSprite = this.add
@@ -1615,6 +1662,7 @@ export class GameScene extends Phaser.Scene {
   private defeatEnemy(enemy: Enemy): void {
     this.destroyBossShield(enemy);
     this.destroyBossHealingEffect(enemy);
+    this.destroyEliteEffect(enemy);
     enemy.sprite?.destroy();
     this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
 
@@ -1656,6 +1704,10 @@ export class GameScene extends Phaser.Scene {
         this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
       }
       this.pushLog('守层者倒下，通往下层的楼梯出现了。');
+    } else if (enemy.elite) {
+      const material = this.createItem('material');
+      material.quantity = this.random.integer(3, 5);
+      if (this.addItem(material)) this.pushLog(`精英怪留下了${material.name} ×${material.quantity}。`);
     } else {
       const loot = this.createMonsterLoot();
       if (loot) this.addItem(loot);
@@ -1717,6 +1769,7 @@ export class GameScene extends Phaser.Scene {
       enemy.y = next.y;
       if (enemy.sprite) this.tweenToGrid(enemy.sprite, next);
       if (enemy.shieldEffect) this.tweenToGrid(enemy.shieldEffect, next);
+      if (enemy.eliteEffect) this.tweenToGrid(enemy.eliteEffect, next);
     }
   }
 
@@ -1727,7 +1780,19 @@ export class GameScene extends Phaser.Scene {
       this.random.integer(0, 1),
       enemy.isBoss,
     );
-    this.damagePlayer(damage, (actualDamage) => `${enemy.name}对你造成 ${actualDamage} 点伤害。`, 'player');
+    const result = this.damagePlayer(
+      damage,
+      (actualDamage) => `${enemy.name}对你造成 ${actualDamage} 点伤害。`,
+      'player',
+    );
+    if (enemy.eliteAffix === 'vampiric' && enemy.hp > 0) {
+      const healing = Math.min(getEliteLifeSteal(result.damage), enemy.maxHp - enemy.hp);
+      if (healing > 0) {
+        enemy.hp += healing;
+        this.showStatusText(enemy.x, enemy.y, `吸血 +${healing}`, '#df83bd');
+        this.pushLog(`${enemy.name}吸取生命，回复 ${healing} 点生命。`);
+      }
+    }
   }
 
   private damagePlayer(
@@ -1965,13 +2030,70 @@ export class GameScene extends Phaser.Scene {
     const result = resolveShieldDamage(enemy.shield ?? 0, damage);
     enemy.shield = result.remainingShield;
     enemy.hp -= result.healthDamage;
+    this.activateEliteFrenzy(enemy);
     this.activateFourthBossHealing(enemy);
     this.activateFifthBossSecondPhase(enemy);
     if (result.absorbed > 0 && result.remainingShield === 0) {
       this.destroyBossShield(enemy);
-      this.pushLog(`${enemy.name}的虚空护盾破碎了。`);
+      this.pushLog(`${enemy.name}的${enemy.elite ? '坚甲护盾' : '虚空护盾'}破碎了。`);
     }
     return { absorbed: result.absorbed, healthDamage: result.healthDamage };
+  }
+
+  private createEliteEffect(enemy: Enemy): void {
+    const affix = ELITE_AFFIXES.find((candidate) => candidate.id === enemy.eliteAffix) ?? ELITE_AFFIXES[0];
+    const ring = this.add.circle(0, 0, 19, affix.color, 0.08)
+      .setStrokeStyle(2, affix.color, 0.92)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const label = this.add.text(0, -28, affix.label, {
+      fontFamily: 'Microsoft YaHei, sans-serif',
+      fontSize: '9px',
+      color: `#${affix.color.toString(16).padStart(6, '0')}`,
+      backgroundColor: '#101315',
+      padding: { x: 4, y: 2 },
+    }).setOrigin(0.5);
+    const effect = this.add
+      .container(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, [ring, label])
+      .setDepth(8);
+    enemy.eliteEffect = effect;
+    this.actorGroup.add(effect);
+    this.tweens.add({
+      targets: ring,
+      alpha: { from: 0.35, to: 0.95 },
+      scaleX: { from: 0.9, to: 1.18 },
+      scaleY: { from: 0.9, to: 1.18 },
+      duration: 640,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private destroyEliteEffect(enemy: Enemy): void {
+    if (!enemy.eliteEffect) return;
+    this.tweens.killTweensOf(enemy.eliteEffect.list);
+    enemy.eliteEffect.destroy(true);
+    enemy.eliteEffect = undefined;
+  }
+
+  private activateEliteFrenzy(enemy: Enemy): void {
+    if (
+      !enemy.elite ||
+      enemy.eliteAffix !== 'frenzy' ||
+      enemy.eliteEnraged ||
+      enemy.hp <= 0 ||
+      enemy.hp * 2 > enemy.maxHp
+    ) {
+      return;
+    }
+    enemy.eliteEnraged = true;
+    enemy.attack = getEliteFrenzyAttack(enemy.attack);
+    this.showStatusText(enemy.x, enemy.y, '狂怒', '#f07a64');
+    enemy.sprite?.setTintFill(0xff5d4d);
+    this.time.delayedCall(130, () => {
+      if (enemy.sprite?.active) enemy.sprite.setTint(enemy.tint);
+    });
+    this.pushLog(`${enemy.name}进入狂怒，攻击提高到 ${enemy.attack}。`);
   }
 
   private activateFourthBossHealing(enemy: Enemy): void {
@@ -2812,13 +2934,14 @@ export class GameScene extends Phaser.Scene {
     this.finishTurn();
   }
 
-  private addItem(item: Item): void {
+  private addItem(item: Item): boolean {
     if (item.type === 'potion' || item.type === 'material') {
       const existing = this.inventory.find((candidate) => canStackItems(candidate, item));
       if (existing) {
         existing.quantity = itemQuantity(existing) + itemQuantity(item);
-        this.pushLog(`${item.name}已叠加，当前共有 ${existing.quantity} 瓶。`);
-        return;
+        const unit = item.type === 'potion' ? '瓶' : '份';
+        this.pushLog(`${item.name}已叠加，当前共有 ${existing.quantity} ${unit}。`);
+        return true;
       }
     }
 
@@ -2827,7 +2950,7 @@ export class GameScene extends Phaser.Scene {
         const abandoned = this.inventory.pop();
         this.inventory.push(item);
         this.pushLog(`为唯一的逃脱卷轴腾出位置，遗下了${abandoned?.name ?? '一件物品'}。`);
-        return;
+        return true;
       }
       if ((item.type === 'weapon' || item.type === 'armor') && isCarryableEquipment(item)) {
         let replaceIndex = -1;
@@ -2846,15 +2969,16 @@ export class GameScene extends Phaser.Scene {
         this.removePendingEquipment(abandoned);
         this.queueCarryableEquipment(item);
         this.pushLog(`为${equipmentTierLabel(getEquipmentTier(item))}腾出位置，遗下了${abandoned.name}。`);
-        return;
+        return true;
       }
       const salvage = Math.max(2, item.power);
       this.gold += salvage;
       this.pushLog(`行囊已满，将${item.name}拆换成 ${salvage} 枚古币。`);
-      return;
+      return false;
     }
     this.inventory.push(item);
     this.queueCarryableEquipment(item);
+    return true;
   }
 
   private animatePremiumPickup(item: Item, origin: Point): void {
@@ -3284,6 +3408,7 @@ export class GameScene extends Phaser.Scene {
       enemy.sprite?.setVisible(visible);
       enemy.shieldEffect?.setVisible(visible);
       enemy.healingEffect?.setVisible(visible);
+      enemy.eliteEffect?.setVisible(visible);
     }
     for (const chest of this.chests) chest.sprite?.setVisible(this.visible.has(`${chest.x},${chest.y}`));
     this.exitSprite?.setVisible(
@@ -3291,7 +3416,10 @@ export class GameScene extends Phaser.Scene {
     );
   }
 
-  private tweenToGrid(sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Arc, point: Point): void {
+  private tweenToGrid(
+    sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Arc | Phaser.GameObjects.Container,
+    point: Point,
+  ): void {
     this.tweens.killTweensOf(sprite);
     this.tweens.add({
       targets: sprite,
