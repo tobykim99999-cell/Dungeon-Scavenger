@@ -16,10 +16,23 @@ import {
 } from './dungeon';
 import { computeFieldOfView } from './fov';
 import {
+  FOURTH_BOSS_BURN_TURNS,
+  FOURTH_BOSS_CONTROL_TURNS,
+  FOURTH_BOSS_HEAL_TURNS,
+  FIFTH_BOSS_SUMMON_CAP,
+  getBossChargeReinforcement,
+  getFourthBossBurnDamage,
+  getFourthBossHealingAmount,
   getBossSkill,
   getBossSkillById,
   getBossSkillDamage,
+  getBossSkillForPhase,
   getBossSkillTiles,
+  resolveShieldDamage,
+  shouldEnterBossSecondPhase,
+  shouldStartFourthBossHealing,
+  getThirdBossReleaseSummonCount,
+  THIRD_BOSS_SUMMON_CAP,
   type BossSkillDefinition,
 } from './bossSkills';
 import { createBestiaryRegions } from './bestiary';
@@ -161,6 +174,33 @@ interface Step {
   y: number;
 }
 
+interface BossSummonProfile {
+  name: string;
+  tint: number;
+  templateIndex: 0 | 1 | 2;
+  hpRatio: number;
+  attackRatio: number;
+  defenseRatio: number;
+}
+
+const VOID_SUMMON_PROFILE: BossSummonProfile = {
+  name: '虚空侍从',
+  tint: 0x9b78e8,
+  templateIndex: 1,
+  hpRatio: 0.12,
+  attackRatio: 0.5,
+  defenseRatio: 0.45,
+};
+
+const SPORE_SUMMON_PROFILE: BossSummonProfile = {
+  name: '蚀孢幼体',
+  tint: 0x9edb63,
+  templateIndex: 0,
+  hpRatio: 0.1,
+  attackRatio: 0.45,
+  defenseRatio: 0.35,
+};
+
 export class GameScene extends Phaser.Scene {
   private status: RunStatus = 'waiting';
   private inTown = false;
@@ -210,6 +250,9 @@ export class GameScene extends Phaser.Scene {
   private random: RandomSource = createRandom(Date.now());
   private itemSerial = 0;
   private combatTextSerial = 0;
+  private playerControlTurns = 0;
+  private playerBurnTurns = 0;
+  private playerBurnDamage = 0;
 
   private mapGroup!: Phaser.GameObjects.Group;
   private objectGroup!: Phaser.GameObjects.Group;
@@ -219,6 +262,7 @@ export class GameScene extends Phaser.Scene {
   private autoTargetGraphics!: Phaser.GameObjects.Graphics;
   private bossSkillGraphics!: Phaser.GameObjects.Graphics;
   private playerSprite!: Phaser.GameObjects.Sprite;
+  private playerControlEffect?: Phaser.GameObjects.Container;
   private exitSprite!: Phaser.GameObjects.Sprite;
   private autoMoveTarget?: Point;
   private autoCombatTargetId?: string;
@@ -428,6 +472,7 @@ export class GameScene extends Phaser.Scene {
 
   private advanceAutoMove(generation: number): void {
     if (generation !== this.autoMoveGeneration) return;
+    if (this.consumePlayerControlTurn()) return;
     if (!this.canUsePointerControls() || !this.autoMoveTarget) {
       this.cancelAutoMove();
       return;
@@ -682,6 +727,14 @@ export class GameScene extends Phaser.Scene {
     }
     if (this.gildingOptions) return;
 
+    if (
+      this.playerControlTurns > 0 &&
+      (command.action === 'move' || command.action === 'use-item' || command.action === 'escape' || command.action === 'return-town')
+    ) {
+      this.consumePlayerControlTurn();
+      return;
+    }
+
     if (command.action === 'move') {
       const directions: Record<MoveDirection, Step> = {
         up: { x: 0, y: -1 },
@@ -724,6 +777,9 @@ export class GameScene extends Phaser.Scene {
     this.merchantOffers = null;
     this.merchantReveal = null;
     this.discardCandidate = null;
+    this.playerControlTurns = 0;
+    this.playerBurnTurns = 0;
+    this.playerBurnDamage = 0;
     this.altarFloors.clear();
     this.logEntries = status === 'active' ? ['铁门在身后合拢。'] : [];
     this.random = createRandom((Date.now() ^ 0xa51b3c7d) >>> 0);
@@ -754,6 +810,9 @@ export class GameScene extends Phaser.Scene {
     this.merchantOffers = null;
     this.merchantReveal = null;
     this.discardCandidate = null;
+    this.playerControlTurns = 0;
+    this.playerBurnTurns = 0;
+    this.playerBurnDamage = 0;
     this.altarFloors.clear();
     this.loadTownStorage();
     this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
@@ -792,8 +851,13 @@ export class GameScene extends Phaser.Scene {
   private clearLevel(): void {
     this.cancelAutoMove();
     this.stopHeldMovement();
+    this.destroyPlayerControlEffect();
     for (const chest of this.chests) {
       if (chest.effect) this.tweens.killTweensOf(chest.effect.list);
+    }
+    for (const enemy of this.enemies) {
+      this.destroyBossShield(enemy);
+      this.destroyBossHealingEffect(enemy);
     }
     this.mapGroup?.clear(true, true);
     this.objectGroup?.clear(true, true);
@@ -1300,6 +1364,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private finishTurn(): void {
+    this.applyPlayerBurnTurn();
+    if (this.status === 'dead') return;
     this.updateVision();
     this.runEnemyTurns();
     this.updateVision();
@@ -1307,13 +1373,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   private attackEnemy(enemy: Enemy): void {
+    if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
+      this.cancelAutoMove();
+      this.playSound('hit', 0.25);
+      this.showStatusText(enemy.x, enemy.y, '无敌', '#ffd078');
+      this.pushLog(`${enemy.name}正在熔火再生，当前攻击无法造成伤害。`);
+      return;
+    }
     const setBonus = resolveSetBonus(this.weapon, this.armor)?.affix;
     const baseDamage = Math.max(1, this.totalAttack - enemy.defense + this.random.integer(-1, 1));
     const critical = setBonus?.stat === 'crit' && shouldCriticalHit(setBonus.value, this.random.next());
     const damage = critical ? baseDamage * 2 : baseDamage;
-    enemy.hp -= damage;
+    const result = this.applyDamageToEnemy(enemy, damage);
     this.playSound('hit', 0.42);
-    this.showDamage(enemy.x, enemy.y, damage, critical ? 'critical' : 'normal');
+    if (result.absorbed > 0) this.showDamage(enemy.x, enemy.y, result.absorbed, 'shield');
+    if (result.healthDamage > 0) {
+      this.showDamage(enemy.x, enemy.y, result.healthDamage, critical ? 'critical' : 'normal');
+    }
     enemy.sprite?.setTintFill(0xf5dfc4);
     this.time.delayedCall(70, () => {
       if (!enemy.sprite?.active) return;
@@ -1321,7 +1397,9 @@ export class GameScene extends Phaser.Scene {
     });
 
     if (enemy.hp > 0) {
-      this.pushLog(`${critical ? '暴击！' : ''}你击中${enemy.name}，造成 ${damage} 点伤害。`);
+      const shieldMessage = result.absorbed > 0 ? `，护盾吸收 ${result.absorbed} 点` : '';
+      const healthMessage = result.healthDamage > 0 ? `，生命受到 ${result.healthDamage} 点伤害` : '';
+      this.pushLog(`${critical ? '暴击！' : ''}你击中${enemy.name}${shieldMessage}${healthMessage}。`);
       if (setBonus?.stat === 'bleed') {
         enemy.bleedDamage = setBonus.value;
         enemy.bleedTurns = 2;
@@ -1335,16 +1413,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   private defeatEnemy(enemy: Enemy): void {
+    this.destroyBossShield(enemy);
+    this.destroyBossHealingEffect(enemy);
+    enemy.sprite?.destroy();
+    this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
+
+    if (enemy.summonedByBoss) {
+      this.pushLog(`${enemy.name}消散，没有留下战利品。`);
+      return;
+    }
+
     this.gold += enemy.reward;
     this.pushLog(`${enemy.name}倒下，找到 ${enemy.reward} 枚古币。`);
     this.playSound('coins', 0.28);
-    enemy.sprite?.destroy();
-    this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
 
     if (enemy.isBoss) {
       this.tweens.killTweensOf(this.bossSkillGraphics);
       this.bossSkillGraphics.clear().setAlpha(1);
       this.bossDefeated = true;
+      const remainingSummons = this.enemies.filter((candidate) => candidate.summonedByBoss);
+      for (const summon of remainingSummons) summon.sprite?.destroy();
+      this.enemies = this.enemies.filter((candidate) => !candidate.summonedByBoss);
+      if (remainingSummons.length > 0) this.pushLog(`${enemy.name}倒下，残存的召唤物随之消散。`);
       if (!this.heroicUnlocked && shouldUnlockHeroic(this.adventureMode, this.floor)) {
         this.heroicUnlocked = true;
         localStorage.setItem(HEROIC_UNLOCK_KEY, '1');
@@ -1372,20 +1462,34 @@ export class GameScene extends Phaser.Scene {
   }
 
   private runEnemyTurns(): void {
-    for (const enemy of this.enemies) {
+    for (const enemy of [...this.enemies]) {
+      if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
+        this.runBossHealingTurn(enemy);
+        continue;
+      }
+
       if ((enemy.bleedTurns ?? 0) > 0 && (enemy.bleedDamage ?? 0) > 0) {
         const bleedDamage = enemy.bleedDamage!;
-        enemy.hp -= bleedDamage;
+        const result = this.applyDamageToEnemy(enemy, bleedDamage);
         enemy.bleedTurns = Math.max(0, enemy.bleedTurns! - 1);
-        this.showDamage(enemy.x, enemy.y, bleedDamage, 'bleed');
-        this.pushLog(`${enemy.name}受到 ${bleedDamage} 点流血伤害。`);
+        if (result.absorbed > 0) this.showDamage(enemy.x, enemy.y, result.absorbed, 'shield');
+        if (result.healthDamage > 0) this.showDamage(enemy.x, enemy.y, result.healthDamage, 'bleed');
+        const shieldMessage = result.absorbed > 0 ? `，其中 ${result.absorbed} 点被护盾吸收` : '';
+        this.pushLog(`${enemy.name}受到 ${result.healthDamage} 点流血伤害${shieldMessage}。`);
         if (enemy.hp <= 0) {
           this.defeatEnemy(enemy);
+          if (enemy.isBoss) return;
           continue;
         }
+        if ((enemy.bossHealingTurns ?? 0) > 0) continue;
       }
 
       if (enemy.isBoss && enemy.bossSkillId) {
+        if ((enemy.bossSkillTurnsRemaining ?? 1) > 1) {
+          enemy.bossSkillTurnsRemaining = (enemy.bossSkillTurnsRemaining ?? 1) - 1;
+          this.pushLog(`${enemy.name}继续蓄力「${getBossSkillById(enemy.bossSkillId).name}」，剩余 ${enemy.bossSkillTurnsRemaining} 回合。`);
+          continue;
+        }
         this.resolveBossSkill(enemy);
         if (this.status === 'dead') return;
         continue;
@@ -1411,6 +1515,7 @@ export class GameScene extends Phaser.Scene {
       enemy.x = next.x;
       enemy.y = next.y;
       if (enemy.sprite) this.tweenToGrid(enemy.sprite, next);
+      if (enemy.shieldEffect) this.tweenToGrid(enemy.shieldEffect, next);
     }
   }
 
@@ -1427,36 +1532,398 @@ export class GameScene extends Phaser.Scene {
   private damagePlayer(
     damage: number,
     message: string,
-    type: 'player' | 'boss-skill',
+    type: 'player' | 'boss-skill' | 'burn',
     label = '',
   ): void {
     this.player.hp -= damage;
     this.pushLog(message);
     this.showDamage(this.player.x, this.player.y, damage, type, label);
-    this.cameras.main.shake(type === 'boss-skill' ? 180 : 80, type === 'boss-skill' ? 0.006 : 0.0025);
-    this.playerSprite.setTintFill(0xff746c);
+    const skillHit = type === 'boss-skill';
+    this.cameras.main.shake(skillHit ? 180 : 80, skillHit ? 0.006 : 0.0025);
+    this.playerSprite.setTintFill(type === 'burn' ? 0xffa04d : 0xff746c);
     this.time.delayedCall(80, () => this.playerSprite.clearTint());
 
     if (this.player.hp > 0) return;
     this.player.hp = 0;
     this.status = 'dead';
+    this.destroyPlayerControlEffect();
     this.playerSprite.setTint(0x6e7173).setAngle(90);
     this.pushLog('火把熄灭了。本次收获遗落在洞中。');
     this.emitUiState();
   }
 
+  private applyFourthBossHitEffects(): void {
+    this.playerControlTurns = Math.max(this.playerControlTurns, FOURTH_BOSS_CONTROL_TURNS);
+    this.playerBurnTurns = Math.max(this.playerBurnTurns, FOURTH_BOSS_BURN_TURNS);
+    this.playerBurnDamage = getFourthBossBurnDamage(this.totalMaxHp);
+    this.cancelAutoMove();
+    this.stopHeldMovement();
+    this.refreshPlayerControlVisual();
+    this.showStatusText(this.player.x, this.player.y, `禁锢 ${this.playerControlTurns}`, '#ffb15c');
+    this.pushLog(`陨火将你禁锢 ${this.playerControlTurns} 回合，并附加 ${this.playerBurnTurns} 回合灼烧。`);
+  }
+
+  private consumePlayerControlTurn(): boolean {
+    if (this.status !== 'active' || this.playerControlTurns <= 0) return false;
+    this.cancelAutoMove();
+    this.stopHeldMovement();
+    this.playerControlTurns -= 1;
+    this.showStatusText(
+      this.player.x,
+      this.player.y,
+      this.playerControlTurns > 0 ? `禁锢 ${this.playerControlTurns}` : '挣脱禁锢',
+      '#ffb15c',
+    );
+    if (this.playerControlEffect) {
+      this.tweens.add({
+        targets: this.playerControlEffect,
+        angle: this.playerControlEffect.angle + 90,
+        scaleX: 1.18,
+        scaleY: 1.18,
+        duration: 180,
+        yoyo: true,
+      });
+    }
+    this.pushLog(
+      this.playerControlTurns > 0
+        ? `你被陨火禁锢，无法行动，剩余 ${this.playerControlTurns} 回合。`
+        : '你挣脱了陨火禁锢。',
+    );
+    if (this.playerControlTurns === 0) this.fadePlayerControlEffect();
+    this.finishTurn();
+    return true;
+  }
+
+  private applyPlayerBurnTurn(): void {
+    if (this.playerBurnTurns <= 0 || this.status !== 'active') return;
+    const damage = this.playerBurnDamage;
+    this.playerBurnTurns -= 1;
+    if (this.playerBurnTurns === 0) this.playerBurnDamage = 0;
+    this.damagePlayer(
+      damage,
+      `灼烧造成 ${damage} 点伤害，剩余 ${this.playerBurnTurns} 回合。`,
+      'burn',
+    );
+  }
+
+  private refreshPlayerControlVisual(): void {
+    this.destroyPlayerControlEffect();
+    const ring = this.add.circle(0, 0, 23, 0xff6b36, 0.12)
+      .setStrokeStyle(3, 0xffb15c, 0.95);
+    const horizontal = this.add.rectangle(0, 0, 42, 5, 0xff7a3e, 0.7);
+    const vertical = this.add.rectangle(0, 0, 5, 42, 0xff7a3e, 0.7);
+    ring.setBlendMode(Phaser.BlendModes.ADD);
+    horizontal.setBlendMode(Phaser.BlendModes.ADD);
+    vertical.setBlendMode(Phaser.BlendModes.ADD);
+    const effect = this.add
+      .container(this.player.x * TILE_SIZE + 16, this.player.y * TILE_SIZE + 16, [ring, horizontal, vertical])
+      .setDepth(25);
+    this.playerControlEffect = effect;
+    this.actorGroup.add(effect);
+    this.tweens.add({
+      targets: effect,
+      angle: 360,
+      alpha: { from: 0.55, to: 1 },
+      duration: 720,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private fadePlayerControlEffect(): void {
+    const effect = this.playerControlEffect;
+    if (!effect) return;
+    this.playerControlEffect = undefined;
+    this.tweens.killTweensOf(effect);
+    this.tweens.add({
+      targets: effect,
+      alpha: 0,
+      scaleX: 1.5,
+      scaleY: 1.5,
+      duration: 280,
+      onComplete: () => {
+        if (effect.active) effect.destroy();
+      },
+    });
+  }
+
+  private destroyPlayerControlEffect(): void {
+    if (!this.playerControlEffect) return;
+    this.tweens.killTweensOf(this.playerControlEffect);
+    this.playerControlEffect.destroy();
+    this.playerControlEffect = undefined;
+  }
+
   private prepareBossSkill(enemy: Enemy): void {
-    const skill = getBossSkill(this.floor);
+    const skill = enemy.bossSecondPhase
+      ? getBossSkillForPhase(this.floor, true, this.random.next())
+      : getBossSkill(this.floor);
     const target = { x: this.player.x, y: this.player.y };
-    const dangerTiles = getBossSkillTiles(skill, target, this.dungeon.tiles);
+    const blocked = new Set(this.enemies.map((candidate) => `${candidate.x},${candidate.y}`));
+    const dangerTiles = getBossSkillTiles(
+      skill,
+      target,
+      this.dungeon.tiles,
+      () => this.random.next(),
+      blocked,
+    );
     enemy.bossActionCount = 0;
     enemy.bossSkillId = skill.id;
+    enemy.bossSkillTurnsRemaining = skill.chargeTurns;
     enemy.bossSkillTarget = target;
     enemy.bossSkillTiles = dangerTiles;
     this.cancelAutoMove();
     this.stopHeldMovement();
+    this.reinforceFifthBoss(enemy);
     this.renderBossSkillWarning(skill, dangerTiles);
-    this.pushLog(`${enemy.name}开始蓄力「${skill.name}」，离开高亮危险格！`);
+    this.pushLog(`${enemy.name}开始蓄力「${skill.name}」，${skill.chargeTurns} 回合后释放，离开高亮危险格！`);
+  }
+
+  private reinforceFifthBoss(enemy: Enemy): void {
+    const activeSummons = this.enemies.filter((candidate) => candidate.summonedByBoss).length;
+    const reinforcement = getBossChargeReinforcement(this.floor, enemy.maxHp, activeSummons);
+    if (reinforcement.shield <= 0) return;
+
+    enemy.shield = reinforcement.shield;
+    enemy.maxShield = reinforcement.shield;
+    this.refreshBossShieldVisual(enemy);
+    this.pushLog(`${enemy.name}展开 ${reinforcement.shield} 点虚空护盾。`);
+
+    const summoned = this.summonBossMinions(enemy, reinforcement.summonCount, VOID_SUMMON_PROFILE);
+    if (summoned > 0) this.pushLog(`${enemy.name}从裂隙中召唤了 ${summoned} 名虚空侍从。`);
+    else if (activeSummons >= FIFTH_BOSS_SUMMON_CAP) this.pushLog('虚空侍从已经占满大殿。');
+  }
+
+  private summonBossMinions(boss: Enemy, count: number, profile: BossSummonProfile): number {
+    if (count <= 0) return 0;
+    const occupied = new Set(this.enemies.map((enemy) => `${enemy.x},${enemy.y}`));
+    occupied.add(`${this.player.x},${this.player.y}`);
+    const candidates = collectWalkableTiles(this.dungeon).filter((point) =>
+      !occupied.has(`${point.x},${point.y}`) &&
+      this.distance(point, boss) >= 2 &&
+      this.distance(point, boss) <= 6 &&
+      this.distance(point, this.player) >= 3,
+    );
+    this.shuffle(candidates);
+
+    const theme = getRegionTheme(this.floor);
+    const template = theme.enemies[profile.templateIndex];
+    let summoned = 0;
+    for (const position of candidates.slice(0, count)) {
+      const minion: Enemy = {
+        id: `boss-summon-${this.floor}-${this.itemSerial++}`,
+        name: profile.name,
+        x: position.x,
+        y: position.y,
+        hp: Math.max(1, Math.round(boss.maxHp * profile.hpRatio)),
+        maxHp: Math.max(1, Math.round(boss.maxHp * profile.hpRatio)),
+        attack: Math.max(1, Math.round(boss.attack * profile.attackRatio)),
+        defense: Math.max(0, Math.round(boss.defense * profile.defenseRatio)),
+        reward: 0,
+        frame: template.frame,
+        tint: profile.tint,
+        scale: template.scale,
+        alerted: true,
+        isBoss: false,
+        summonedByBoss: true,
+      };
+      minion.sprite = this.add
+        .sprite(position.x * TILE_SIZE + 16, position.y * TILE_SIZE + 16, 'tiny-dungeon', minion.frame)
+        .setScale(minion.scale * 0.35)
+        .setTint(minion.tint)
+        .setAlpha(0)
+        .setDepth(7);
+      this.actorGroup.add(minion.sprite);
+      this.enemies.push(minion);
+      this.tweens.add({
+        targets: minion.sprite,
+        alpha: 1,
+        scaleX: minion.scale,
+        scaleY: minion.scale,
+        duration: 320,
+        ease: 'Back.Out',
+      });
+      summoned += 1;
+    }
+    return summoned;
+  }
+
+  private applyDamageToEnemy(
+    enemy: Enemy,
+    damage: number,
+  ): { absorbed: number; healthDamage: number } {
+    const result = resolveShieldDamage(enemy.shield ?? 0, damage);
+    enemy.shield = result.remainingShield;
+    enemy.hp -= result.healthDamage;
+    this.activateFourthBossHealing(enemy);
+    this.activateFifthBossSecondPhase(enemy);
+    if (result.absorbed > 0 && result.remainingShield === 0) {
+      this.destroyBossShield(enemy);
+      this.pushLog(`${enemy.name}的虚空护盾破碎了。`);
+    }
+    return { absorbed: result.absorbed, healthDamage: result.healthDamage };
+  }
+
+  private activateFourthBossHealing(enemy: Enemy): void {
+    if (
+      !enemy.isBoss ||
+      !shouldStartFourthBossHealing(
+        this.floor,
+        enemy.hp,
+        enemy.maxHp,
+        enemy.bossHealingPhases ?? 0,
+      )
+    ) {
+      return;
+    }
+
+    enemy.bossHealingPhases = (enemy.bossHealingPhases ?? 0) + 1;
+    enemy.bossHealingTurns = FOURTH_BOSS_HEAL_TURNS;
+    enemy.bossHealingJustStarted = true;
+    enemy.bossActionCount = 0;
+    enemy.bossSkillId = undefined;
+    enemy.bossSkillTurnsRemaining = undefined;
+    enemy.bossSkillTarget = undefined;
+    enemy.bossSkillTiles = undefined;
+    enemy.bleedDamage = undefined;
+    enemy.bleedTurns = 0;
+    this.cancelAutoMove();
+    this.stopHeldMovement();
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    this.refreshBossHealingVisual(enemy);
+    this.pushLog(`${enemy.name}损失了三分之一生命，发动「熔火再生」并进入无敌状态！`);
+  }
+
+  private runBossHealingTurn(enemy: Enemy): void {
+    if (enemy.bossHealingJustStarted) {
+      enemy.bossHealingJustStarted = false;
+      return;
+    }
+
+    const rolledHealing = getFourthBossHealingAmount(enemy.maxHp, this.random.next());
+    const healing = Math.min(rolledHealing, enemy.maxHp - enemy.hp);
+    enemy.hp += healing;
+    enemy.bossHealingTurns = Math.max(0, (enemy.bossHealingTurns ?? 0) - 1);
+    this.showStatusText(enemy.x, enemy.y, `+${healing}`, '#9be887');
+    this.playBossHealingPulse(enemy);
+    this.pushLog(`${enemy.name}通过熔火再生回复 ${healing} 点生命，剩余 ${enemy.bossHealingTurns} 回合。`);
+
+    if ((enemy.bossHealingTurns ?? 0) > 0) return;
+    this.destroyBossHealingEffect(enemy);
+    this.pushLog(`${enemy.name}的熔火再生结束，无敌状态解除。`);
+  }
+
+  private refreshBossHealingVisual(enemy: Enemy): void {
+    this.destroyBossHealingEffect(enemy);
+    const outer = this.add.circle(0, 0, 29, 0xff6d3a, 0.1)
+      .setStrokeStyle(3, 0xffb24f, 0.9)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const inner = this.add.circle(0, 0, 19, 0x72d87c, 0.16)
+      .setStrokeStyle(2, 0xa7f08e, 0.8)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    const sparks = [0, 1, 2, 3].map((index) => {
+      const angle = (Math.PI / 2) * index;
+      return this.add.circle(Math.cos(angle) * 25, Math.sin(angle) * 25, 3, 0xffd36c, 0.95)
+        .setBlendMode(Phaser.BlendModes.ADD);
+    });
+    const effect = this.add
+      .container(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, [outer, inner, ...sparks])
+      .setDepth(9);
+    enemy.healingEffect = effect;
+    this.actorGroup.add(effect);
+    this.tweens.add({
+      targets: effect,
+      angle: 360,
+      duration: 1400,
+      repeat: -1,
+    });
+    this.tweens.add({
+      targets: [outer, inner],
+      alpha: { from: 0.35, to: 1 },
+      duration: 460,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private playBossHealingPulse(enemy: Enemy): void {
+    const effect = enemy.healingEffect;
+    if (effect) {
+      this.tweens.add({
+        targets: effect,
+        scaleX: 1.22,
+        scaleY: 1.22,
+        duration: 180,
+        ease: 'Sine.Out',
+        yoyo: true,
+      });
+    }
+    enemy.sprite?.setTintFill(0x9be887);
+    this.time.delayedCall(110, () => {
+      if (enemy.sprite?.active) enemy.sprite.setTint(enemy.tint);
+    });
+  }
+
+  private destroyBossHealingEffect(enemy: Enemy): void {
+    if (!enemy.healingEffect) return;
+    this.tweens.killTweensOf(enemy.healingEffect);
+    this.tweens.killTweensOf(enemy.healingEffect.list);
+    enemy.healingEffect.destroy(true);
+    enemy.healingEffect = undefined;
+  }
+
+  private activateFifthBossSecondPhase(enemy: Enemy): void {
+    if (!shouldEnterBossSecondPhase(this.floor, enemy.hp, enemy.maxHp, Boolean(enemy.bossSecondPhase))) return;
+    enemy.bossSecondPhase = true;
+    enemy.bossActionCount = 2;
+    this.cameras.main.flash(220, 72, 45, 108, false);
+    if (enemy.sprite) {
+      this.tweens.add({
+        targets: enemy.sprite,
+        scaleX: enemy.scale * 1.2,
+        scaleY: enemy.scale * 1.2,
+        duration: 180,
+        ease: 'Sine.Out',
+        yoyo: true,
+      });
+    }
+    this.pushLog(`${enemy.name}跌破半血，虚空力量失控，进入二阶段！`);
+  }
+
+  private refreshBossShieldVisual(enemy: Enemy): void {
+    this.destroyBossShield(enemy, false);
+    const shield = this.add
+      .circle(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, 26, 0x7657c8, 0.14)
+      .setStrokeStyle(3, 0xc09cff, 0.92)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(8);
+    enemy.shieldEffect = shield;
+    this.actorGroup.add(shield);
+    this.tweens.add({
+      targets: shield,
+      alpha: { from: 0.45, to: 0.9 },
+      scaleX: { from: 0.94, to: 1.12 },
+      scaleY: { from: 0.94, to: 1.12 },
+      duration: 520,
+      ease: 'Sine.InOut',
+      yoyo: true,
+      repeat: -1,
+    });
+  }
+
+  private destroyBossShield(enemy: Enemy, resetShield = true): void {
+    if (enemy.shieldEffect) {
+      this.tweens.killTweensOf(enemy.shieldEffect);
+      enemy.shieldEffect.destroy();
+      enemy.shieldEffect = undefined;
+    }
+    if (resetShield) {
+      enemy.shield = 0;
+      enemy.maxShield = 0;
+    }
   }
 
   private resolveBossSkill(enemy: Enemy): void {
@@ -1466,8 +1933,10 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf(this.bossSkillGraphics);
     this.bossSkillGraphics.clear().setAlpha(1);
     this.playBossSkillAnimation(skill, target, dangerTiles);
+    this.summonThirdBossMinionsOnRelease(enemy);
     const hit = dangerTiles.some((tile) => tile.x === this.player.x && tile.y === this.player.y);
     enemy.bossSkillId = undefined;
+    enemy.bossSkillTurnsRemaining = undefined;
     enemy.bossSkillTarget = undefined;
     enemy.bossSkillTiles = undefined;
     if (!hit) {
@@ -1476,6 +1945,22 @@ export class GameScene extends Phaser.Scene {
     }
     const damage = getBossSkillDamage(skill, enemy.attack, this.totalDefense);
     this.damagePlayer(damage, `「${skill.name}」命中，造成 ${damage} 点伤害。`, 'boss-skill', skill.name);
+    if (this.status !== 'dead' && skill.id === 'meteor' && getRegionIndex(this.floor) === 3) {
+      this.applyFourthBossHitEffects();
+    }
+  }
+
+  private summonThirdBossMinionsOnRelease(enemy: Enemy): void {
+    const activeSummons = this.enemies.filter((candidate) => candidate.summonedByBoss).length;
+    const summonCount = getThirdBossReleaseSummonCount(this.floor, activeSummons);
+    if (summonCount <= 0) {
+      if (getRegionIndex(this.floor) === 2 && activeSummons >= THIRD_BOSS_SUMMON_CAP) {
+        this.pushLog('蚀孢幼体已经布满守层大殿。');
+      }
+      return;
+    }
+    const summoned = this.summonBossMinions(enemy, summonCount, SPORE_SUMMON_PROFILE);
+    if (summoned > 0) this.pushLog(`${enemy.name}借孢子蚀雨孵化了 ${summoned} 只蚀孢幼体。`);
   }
 
   private renderBossSkillWarning(skill: BossSkillDefinition, dangerTiles: Point[]): void {
@@ -1520,19 +2005,43 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     if (skill.visual === 'fire') {
-      const meteor = this.add.circle(centerX, centerY - 150, 16, skill.color, 1)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setDepth(29);
-      this.tweens.add({
-        targets: meteor,
-        y: centerY,
-        scale: 1.7,
-        duration: 260,
-        ease: 'Quad.In',
-        onComplete: () => {
-          this.tweens.add({ targets: meteor, scale: 4, alpha: 0, duration: 320, onComplete: () => meteor.destroy() });
-        },
-      });
+      for (const [index, tile] of dangerTiles.entries()) {
+        const impactX = tile.x * TILE_SIZE + 16;
+        const impactY = tile.y * TILE_SIZE + 16;
+        const meteor = this.add.circle(
+          impactX,
+          impactY - 100 - (index % 4) * 18,
+          7 + (index % 3),
+          skill.color,
+          0.96,
+        )
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setDepth(29);
+        this.tweens.add({
+          targets: meteor,
+          y: impactY,
+          scaleX: 1.55,
+          scaleY: 1.55,
+          delay: (index % 8) * 28,
+          duration: 230 + (index % 3) * 25,
+          ease: 'Quad.In',
+          onComplete: () => {
+            const blast = this.add.circle(impactX, impactY, 9, 0xffa252, 0.72)
+              .setStrokeStyle(2, 0xffd38a, 0.9)
+              .setBlendMode(Phaser.BlendModes.ADD)
+              .setDepth(29);
+            meteor.destroy();
+            this.tweens.add({
+              targets: blast,
+              scaleX: 2.8,
+              scaleY: 2.8,
+              alpha: 0,
+              duration: 300,
+              onComplete: () => blast.destroy(),
+            });
+          },
+        });
+      }
       return;
     }
     if (skill.visual === 'quake') {
@@ -1540,6 +2049,28 @@ export class GameScene extends Phaser.Scene {
         .setStrokeStyle(3, 0xffdda0, 0.9)
         .setDepth(29);
       this.tweens.add({ targets: wave, scaleX: 6, scaleY: 3, alpha: 0, duration: 540, onComplete: () => wave.destroy() });
+      return;
+    }
+    if (skill.visual === 'nova') {
+      const horizontal = this.add.rectangle(centerX, centerY, 108, 12, skill.color, 0.88)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(29);
+      const vertical = this.add.rectangle(centerX, centerY, 12, 108, skill.color, 0.88)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(29);
+      this.tweens.add({
+        targets: [horizontal, vertical],
+        scaleX: 1.5,
+        scaleY: 1.5,
+        angle: 90,
+        alpha: 0,
+        duration: 560,
+        ease: 'Cubic.Out',
+        onComplete: () => {
+          horizontal.destroy();
+          vertical.destroy();
+        },
+      });
       return;
     }
     const burst = this.add.rectangle(centerX, centerY, 24, 90, skill.color, 0.78)
@@ -2528,14 +3059,19 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    for (const enemy of this.enemies) enemy.sprite?.setVisible(this.visible.has(`${enemy.x},${enemy.y}`));
+    for (const enemy of this.enemies) {
+      const visible = this.visible.has(`${enemy.x},${enemy.y}`);
+      enemy.sprite?.setVisible(visible);
+      enemy.shieldEffect?.setVisible(visible);
+      enemy.healingEffect?.setVisible(visible);
+    }
     for (const chest of this.chests) chest.sprite?.setVisible(this.visible.has(`${chest.x},${chest.y}`));
     this.exitSprite?.setVisible(
       this.bossDefeated && this.visible.has(`${this.dungeon.exit.x},${this.dungeon.exit.y}`),
     );
   }
 
-  private tweenToGrid(sprite: Phaser.GameObjects.Sprite, point: Point): void {
+  private tweenToGrid(sprite: Phaser.GameObjects.Sprite | Phaser.GameObjects.Arc, point: Point): void {
     this.tweens.killTweensOf(sprite);
     this.tweens.add({
       targets: sprite,
@@ -2550,13 +3086,15 @@ export class GameScene extends Phaser.Scene {
     x: number,
     y: number,
     amount: number,
-    type: 'normal' | 'critical' | 'bleed' | 'player' | 'boss-skill',
+    type: 'normal' | 'critical' | 'bleed' | 'burn' | 'shield' | 'player' | 'boss-skill',
     customLabel = '',
   ): void {
     const styles = {
       normal: { prefix: '', color: '#f6d06f', size: 14, rise: 22, duration: 540, scale: 1 },
       critical: { prefix: '暴击 ', color: '#fff0a1', size: 17, rise: 34, duration: 760, scale: 1.16 },
       bleed: { prefix: '流血 ', color: '#ef6672', size: 13, rise: 28, duration: 680, scale: 1 },
+      burn: { prefix: '灼烧 ', color: '#ff9a4f', size: 14, rise: 28, duration: 720, scale: 1.06 },
+      shield: { prefix: '护盾 ', color: '#c09cff', size: 14, rise: 26, duration: 680, scale: 1.05 },
       player: { prefix: '', color: '#ff746c', size: 15, rise: 26, duration: 620, scale: 1.08 },
       'boss-skill': { prefix: customLabel ? `${customLabel} ` : '技能 ', color: '#ff8f68', size: 16, rise: 34, duration: 820, scale: 1.12 },
     } as const;
@@ -2580,6 +3118,30 @@ export class GameScene extends Phaser.Scene {
       alpha: 0,
       scale: style.scale * 0.92,
       duration: style.duration,
+      ease: 'Cubic.Out',
+      onComplete: () => label.destroy(),
+    });
+  }
+
+  private showStatusText(x: number, y: number, message: string, color: string): void {
+    const label = this.add
+      .text(x * TILE_SIZE + 16, y * TILE_SIZE - 5, message, {
+        fontFamily: 'Bahnschrift, Microsoft YaHei, sans-serif',
+        fontSize: '14px',
+        fontStyle: 'bold',
+        color,
+        stroke: '#080a0b',
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5)
+      .setDepth(31);
+    this.tweens.add({
+      targets: label,
+      y: label.y - 30,
+      alpha: 0,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      duration: 760,
       ease: 'Cubic.Out',
       onComplete: () => label.destroy(),
     });
@@ -2652,11 +3214,19 @@ export class GameScene extends Phaser.Scene {
       townMaterials: this.townMaterials.map((material) => ({ ...material })),
       merchantOffers: this.merchantOffers?.map((offer) => ({ ...offer })) ?? null,
       merchantReveal: this.merchantReveal ? { ...this.merchantReveal } : null,
+      playerControlTurns: this.playerControlTurns,
+      playerBurnTurns: this.playerBurnTurns,
+      playerBurnDamage: this.playerBurnDamage,
       boss: boss ? {
         name: boss.name,
         hp: boss.hp,
         maxHp: boss.maxHp,
+        shield: boss.shield ?? 0,
+        maxShield: boss.maxShield ?? 0,
+        secondPhase: Boolean(boss.bossSecondPhase),
+        healingTurns: boss.bossHealingTurns ?? 0,
         chargingSkill: boss.bossSkillId ? getBossSkillById(boss.bossSkillId).name : undefined,
+        chargingTurns: boss.bossSkillId ? boss.bossSkillTurnsRemaining ?? 1 : undefined,
       } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));

@@ -60,10 +60,25 @@
                 <strong id="boss-hp">0 / 0</strong>
               </div>
               <div class="boss-health-track" aria-hidden="true"><span id="boss-health-fill"></span></div>
+              <div id="boss-shield" class="boss-shield" hidden>
+                <i data-lucide="shield" aria-hidden="true"></i>
+                <span>虚空护盾</span>
+                <div class="boss-shield-track" aria-hidden="true"><span id="boss-shield-fill"></span></div>
+                <strong id="boss-shield-value">0 / 0</strong>
+              </div>
+              <div id="boss-healing" class="boss-healing" hidden>
+                <i data-lucide="heart-pulse" aria-hidden="true"></i>
+                <span>熔火再生 · 无敌</span>
+                <strong id="boss-healing-turns">3 回合</strong>
+              </div>
               <div id="boss-skill-warning" class="boss-skill-warning" hidden>
                 <i data-lucide="triangle-alert" aria-hidden="true"></i>
                 <span id="boss-skill-name"></span>
               </div>
+            </div>
+            <div id="player-effects" class="player-effects" hidden aria-live="polite">
+              <span id="player-control-effect" hidden><i data-lucide="lock-keyhole" aria-hidden="true"></i><b></b></span>
+              <span id="player-burn-effect" hidden><i data-lucide="flame" aria-hidden="true"></i><b></b></span>
             </div>
             <div id="gilding-modal" class="gilding-modal" hidden role="dialog" aria-modal="true" aria-labelledby="gilding-title">
               <button id="dismiss-gilding-button" class="modal-close" type="button" aria-label="关闭铭金祭台">

@@ -241,6 +241,99 @@ button:focus-visible {
   pointer-events: none;
 }
 
+.boss-encounter.is-second-phase {
+  border-color: #8060ac;
+  box-shadow: 0 0 22px rgba(157, 120, 224, 0.2);
+}
+
+.boss-encounter.is-second-phase .boss-heading span {
+  color: #d8c1f3;
+}
+
+.boss-encounter.is-healing {
+  border-color: #b97a42;
+  box-shadow: 0 0 24px rgba(255, 150, 72, 0.24);
+}
+
+.boss-healing[hidden] {
+  display: none;
+}
+
+.boss-healing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid #705235;
+  color: #ffd08a;
+  font-size: 9px;
+  animation: boss-healing-pulse 720ms ease-in-out infinite alternate;
+}
+
+.boss-healing svg {
+  width: 13px;
+  height: 13px;
+}
+
+.boss-healing strong {
+  margin-left: auto;
+  color: #a9ed9d;
+  white-space: nowrap;
+}
+
+@keyframes boss-healing-pulse {
+  from { opacity: 0.62; }
+  to { opacity: 1; }
+}
+
+.player-effects[hidden],
+.player-effects span[hidden] {
+  display: none;
+}
+
+.player-effects {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: calc(100% - 28px);
+  pointer-events: none;
+}
+
+.player-effects span {
+  min-height: 27px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid #8c5636;
+  border-radius: 4px;
+  color: #ffd5a7;
+  background: rgba(38, 20, 14, 0.9);
+  font-size: 9px;
+  animation: player-effect-pulse 520ms ease-in-out infinite alternate;
+}
+
+.player-effects span:last-child {
+  border-color: #a84f34;
+  color: #ffb274;
+  background: rgba(48, 20, 12, 0.9);
+}
+
+.player-effects svg {
+  width: 13px;
+  height: 13px;
+}
+
+@keyframes player-effect-pulse {
+  from { transform: translateY(0); }
+  to { transform: translateY(-2px); }
+}
+
 .boss-skill-warning[hidden] {
   display: none;
 }
@@ -2027,6 +2120,45 @@ button:focus-visible {
   width: 100%;
   height: 100%;
   background: var(--danger);
+  transition: width 120ms ease;
+}
+
+.boss-shield[hidden] {
+  display: none;
+}
+
+.boss-shield {
+  display: grid;
+  grid-template-columns: 14px auto minmax(54px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  color: #c9b8f2;
+  font-size: 9px;
+}
+
+.boss-shield svg {
+  width: 13px;
+  height: 13px;
+}
+
+.boss-shield > span,
+.boss-shield > strong {
+  white-space: nowrap;
+}
+
+.boss-shield-track {
+  height: 4px;
+  overflow: hidden;
+  background: #29213c;
+}
+
+#boss-shield-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #9d78e0;
+  box-shadow: 0 0 8px rgba(192, 156, 255, 0.55);
   transition: width 120ms ease;
 }
 

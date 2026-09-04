@@ -214,8 +214,18 @@ export interface Enemy {
   bleedTurns?: number;
   bossActionCount?: number;
   bossSkillId?: BossSkillId;
+  bossSkillTurnsRemaining?: number;
   bossSkillTiles?: Array<{ x: number; y: number }>;
   bossSkillTarget?: { x: number; y: number };
+  bossSecondPhase?: boolean;
+  bossHealingTurns?: number;
+  bossHealingJustStarted?: boolean;
+  bossHealingPhases?: number;
+  healingEffect?: Phaser.GameObjects.Container;
+  shield?: number;
+  maxShield?: number;
+  shieldEffect?: Phaser.GameObjects.Arc;
+  summonedByBoss?: boolean;
   sprite?: Phaser.GameObjects.Sprite;
 }
 
@@ -265,11 +275,19 @@ export interface UiState {
   townMaterials: TownMaterialBalance[];
   merchantOffers: MerchantOffer[] | null;
   merchantReveal: MerchantReveal | null;
+  playerControlTurns: number;
+  playerBurnTurns: number;
+  playerBurnDamage: number;
   boss: {
     name: string;
     hp: number;
     maxHp: number;
+    shield: number;
+    maxShield: number;
+    secondPhase: boolean;
+    healingTurns: number;
     chargingSkill?: string;
+    chargingTurns?: number;
   } | null;
 }
 

@@ -71,8 +71,16 @@ const bossEncounter = getElement('boss-encounter');
 const bossName = getElement('boss-name');
 const bossHp = getElement('boss-hp');
 const bossHealthFill = getElement('boss-health-fill');
+const bossShield = getElement('boss-shield');
+const bossShieldFill = getElement('boss-shield-fill');
+const bossShieldValue = getElement('boss-shield-value');
+const bossHealing = getElement('boss-healing');
+const bossHealingTurns = getElement('boss-healing-turns');
 const bossSkillWarning = getElement('boss-skill-warning');
 const bossSkillName = getElement('boss-skill-name');
+const playerEffects = getElement('player-effects');
+const playerControlEffect = getElement('player-control-effect');
+const playerBurnEffect = getElement('player-burn-effect');
 const gildingModal = getElement('gilding-modal');
 const gildingOptions = getElement('gilding-options');
 const dismissGildingButton = getElement<HTMLButtonElement>('dismiss-gilding-button');
@@ -818,15 +826,33 @@ function renderState(state: UiState): void {
   bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
   bagSection.hidden = state.inTown;
   logTitle.textContent = state.inTown ? '城镇纪事' : '洞窟回声';
+  playerEffects.hidden = state.playerControlTurns <= 0 && state.playerBurnTurns <= 0;
+  playerControlEffect.hidden = state.playerControlTurns <= 0;
+  playerControlEffect.querySelector('b')!.textContent = `禁锢 · ${state.playerControlTurns} 回合`;
+  playerBurnEffect.hidden = state.playerBurnTurns <= 0;
+  playerBurnEffect.querySelector('b')!.textContent = `灼烧 · ${state.playerBurnTurns} 回合 · ${state.playerBurnDamage}/回合`;
 
   bossEncounter.hidden = !state.boss;
   if (state.boss) {
-    bossName.textContent = state.boss.name;
+    bossName.textContent = state.boss.secondPhase ? `${state.boss.name} · 二阶段` : state.boss.name;
+    bossEncounter.classList.toggle('is-second-phase', state.boss.secondPhase);
+    bossEncounter.classList.toggle('is-healing', state.boss.healingTurns > 0);
     bossHp.textContent = `${state.boss.hp} / ${state.boss.maxHp}`;
     bossHealthFill.style.width = `${Math.max(0, (state.boss.hp / state.boss.maxHp) * 100)}%`;
+    bossShield.hidden = state.boss.shield <= 0;
+    bossShieldFill.style.width = `${Math.max(0, (state.boss.shield / Math.max(1, state.boss.maxShield)) * 100)}%`;
+    bossShieldValue.textContent = `${state.boss.shield} / ${state.boss.maxShield}`;
+    bossHealing.hidden = state.boss.healingTurns <= 0;
+    bossHealingTurns.textContent = `${state.boss.healingTurns} 回合`;
     bossSkillWarning.hidden = !state.boss.chargingSkill;
-    bossSkillName.textContent = state.boss.chargingSkill ? `${state.boss.chargingSkill} · 躲开高亮格` : '';
+    bossSkillName.textContent = state.boss.chargingSkill
+      ? `${state.boss.chargingSkill} · ${state.boss.chargingTurns ?? 1} 回合后释放 · 躲开高亮格`
+      : '';
   } else {
+    bossEncounter.classList.remove('is-second-phase');
+    bossEncounter.classList.remove('is-healing');
+    bossShield.hidden = true;
+    bossHealing.hidden = true;
     bossSkillWarning.hidden = true;
     bossSkillName.textContent = '';
   }
