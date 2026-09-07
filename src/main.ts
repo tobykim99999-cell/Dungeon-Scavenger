@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { createIcons, icons } from 'lucide';
 import './style.css';
 import { GameScene } from './game/GameScene';
+import { getRefinedMaterialName } from './game/dismantling';
+import { getCraftingCost, type CraftingRecipe } from './game/crafting';
 import {
   equipmentTierLabel,
   getEnhancementBonus,
@@ -97,12 +99,34 @@ const artisanModal = getElement('artisan-modal');
 const artisanOptions = getElement('artisan-options');
 const artisanDetail = getElement('artisan-detail');
 const artisanBankedGold = getElement('artisan-banked-gold');
+const artisanRefinedMaterials = getElement('artisan-refined-materials');
+const artisanEquipmentTab = getElement<HTMLButtonElement>('artisan-equipment-tab');
+const artisanCraftingTab = getElement<HTMLButtonElement>('artisan-crafting-tab');
+const artisanEquipmentWorkbench = getElement('artisan-equipment-workbench');
+const craftingWorkbench = getElement('crafting-workbench');
+const craftingTier = getElement<HTMLSelectElement>('crafting-tier');
+const craftingType = getElement<HTMLSelectElement>('crafting-type');
+const craftingLevel = getElement<HTMLSelectElement>('crafting-level');
+const craftingPreviewTitle = getElement('crafting-preview-title');
+const craftingPreviewPower = getElement('crafting-preview-power');
+const craftingPreviewAffix = getElement('crafting-preview-affix');
+const craftingMaterialCost = getElement('crafting-material-cost');
+const craftingGoldCost = getElement('crafting-gold-cost');
+const craftEquipmentButton = getElement<HTMLButtonElement>('craft-equipment-button');
+const craftingResult = getElement('crafting-result');
+let artisanMode: 'equipment' | 'crafting' = 'equipment';
+let currentArtisanState: UiState | undefined;
 const dismissArtisanButton = getElement<HTMLButtonElement>('dismiss-artisan-button');
 const enhancementConfirmation = getElement('enhancement-confirmation');
 const enhancementConfirmationItem = getElement('enhancement-confirmation-item');
 const enhancementConfirmationCopy = getElement('enhancement-confirmation-copy');
 const dismissEnhancementConfirmationButton = getElement<HTMLButtonElement>('dismiss-enhancement-confirmation-button');
 const confirmEnhancementButton = getElement<HTMLButtonElement>('confirm-enhancement-button');
+const dismantleConfirmation = getElement('dismantle-confirmation');
+const dismantleConfirmationItem = getElement('dismantle-confirmation-item');
+const dismantleConfirmationCopy = getElement('dismantle-confirmation-copy');
+const dismissDismantleButton = getElement<HTMLButtonElement>('dismiss-dismantle-button');
+const confirmDismantleButton = getElement<HTMLButtonElement>('confirm-dismantle-button');
 const bestiaryModal = getElement('bestiary-modal');
 const bestiaryRegions = getElement('bestiary-regions');
 const dismissBestiaryButton = getElement<HTMLButtonElement>('dismiss-bestiary-button');
@@ -215,6 +239,7 @@ function equipmentScoreMarkup(score: number, className = ''): string {
 function warehouseAttributesMarkup(type: 'weapon' | 'armor', equipment: Equipment): string {
   const enhancement = getEnhancementBonus(type, equipment);
   const attributes = [
+    ...(equipment.craftingLevel ? [`<span class="warehouse-attribute is-base"><small>打造等级</small><b>Lv.${equipment.craftingLevel}</b></span>`] : []),
     `<span class="warehouse-attribute is-base"><small>原始属性</small><b>${type === 'weapon' ? '攻击' : '防御'} +${equipment.power}</b></span>`,
   ];
   if (enhancement.attack > 0 || enhancement.defense > 0 || enhancement.maxHp > 0) {
@@ -253,6 +278,7 @@ function renderEquipmentValue(
   const name = document.createElement('span');
   name.className = 'equipment-item-name';
   name.textContent = equipment.name;
+  if (equipment.craftingLevel) name.textContent += ` · Lv.${equipment.craftingLevel}`;
   title.append(tier, name);
 
   const stats = document.createElement('span');
@@ -305,7 +331,7 @@ function renderInventory(items: Item[], capacity: number): void {
         <span class="slot-index">${index + 1}</span>
         ${tier ? `<span class="slot-equipment-tier">${equipmentTierLabel(tier)}</span>` : ''}
         <i data-lucide="${iconForItem(item)}" aria-hidden="true"></i>
-        <strong>${item.name}</strong>
+        <strong>${item.name}${item.craftingLevel ? ` · Lv.${item.craftingLevel}` : ''}</strong>
         <small>${item.description}</small>
         ${tier ? equipmentScoreMarkup(getEquipmentScore(item.type as 'weapon' | 'armor', item), 'slot-equipment-score') : ''}
         ${item.affixes?.map((affix) => `<em class="slot-affix">${affixText(affix)}</em>`).join('') ?? ''}
@@ -582,6 +608,7 @@ function renderTownLoadout(state: UiState): void {
           setName: option.setName,
           setBonus: option.setBonus,
           enhancementLevel: option.enhancementLevel,
+          craftingLevel: option.craftingLevel,
         })}
       </span>
       ${equipmentScoreMarkup(option.score, 'warehouse-card-score')}
@@ -602,13 +629,31 @@ function renderTownLoadout(state: UiState): void {
 }
 
 function renderArtisan(state: UiState): void {
+  if (!state.artisanOptions || !currentArtisanState?.artisanOptions) artisanMode = 'equipment';
+  currentArtisanState = state;
+  renderCrafting(state);
   const options = state.artisanOptions;
   artisanModal.hidden = !options;
   artisanOptions.replaceChildren();
   artisanDetail.replaceChildren();
   artisanBankedGold.textContent = String(state.bankedGold);
+  artisanRefinedMaterials.replaceChildren(
+    ...(['metal-fragment', 'dark-gold-core', 'set-fragment'] as const).map((type) => {
+      const item = document.createElement('span');
+      item.className = `refined-${type}`;
+      item.textContent = `${getRefinedMaterialName(type)} ${state.refinedMaterials.find((entry) => entry.type === type)?.quantity ?? 0}`;
+      return item;
+    }),
+  );
   const confirmation = state.enhancementConfirmation;
   enhancementConfirmation.hidden = !confirmation;
+  dismantleConfirmation.hidden = !state.dismantleConfirmation;
+  if (state.dismantleConfirmation) {
+    const confirmation = state.dismantleConfirmation;
+    dismantleConfirmationItem.textContent = `${confirmation.name} · ${equipmentTierLabel(confirmation.tier)}`;
+    dismantleConfirmationItem.className = `tier-${confirmation.tier}`;
+    dismantleConfirmationCopy.textContent = `${confirmation.equipped ? '这件装备当前已装备，分解后会恢复对应初始装备。' : ''}分解后永久删除，获得 ${confirmation.reward.name} ×${confirmation.reward.quantity}，不返还古币。`;
+  }
   if (confirmation) {
     enhancementConfirmationItem.textContent = `${confirmation.name} · 目标强化 +${confirmation.nextLevel}`;
     enhancementConfirmationCopy.textContent = `本次成功率 ${confirmation.successChance}%，将消耗 ${confirmation.cost} 枚入库古币。失败会消耗古币，但装备不会损坏或降级。是否继续？`;
@@ -633,7 +678,7 @@ function renderArtisan(state: UiState): void {
       <span>
         <small><span class="artisan-tier-copy">${equipmentTierLabel(option.tier)} · ${option.type === 'weapon' ? '武器' : '护甲'}</span>${option.equipped ? '<b class="artisan-equipped-label">已装备</b>' : ''}</small>
         <strong>${option.name}</strong>
-        <em>强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
+        <em>${option.craftingLevel ? `Lv.${option.craftingLevel} · ` : ''}强化 +${option.enhancementLevel} / +${option.maxLevel}</em>
         ${equipmentScoreMarkup(option.score, 'compact-equipment-score')}
       </span>
       <b>+${option.enhancementLevel}</b>
@@ -688,6 +733,73 @@ function renderArtisan(state: UiState): void {
     : `<i data-lucide="hammer" aria-hidden="true"></i><span>${selected.canEnhance ? `强化到 +${selected.enhancementLevel + 1}` : `还需 ${selected.nextCost} 古币`}</span>`;
   enhanceButton.addEventListener('click', () => sendCommand({ action: 'enhance-equipment', targetId: selected.targetId }));
   artisanDetail.append(enhanceButton);
+  const dismantleYield = document.createElement('p');
+  dismantleYield.className = 'artisan-dismantle-yield';
+  dismantleYield.textContent = `分解返还：${selected.dismantleMaterialName} ×${selected.dismantleQuantity}`;
+  artisanDetail.append(dismantleYield);
+  const dismantleButton = document.createElement('button');
+  dismantleButton.type = 'button';
+  dismantleButton.className = 'artisan-dismantle-button';
+  dismantleButton.innerHTML = '<i data-lucide="recycle" aria-hidden="true"></i><span>分解装备</span>';
+  dismantleButton.addEventListener('click', () => sendCommand({ action: 'request-dismantle', targetId: selected.targetId }));
+  artisanDetail.append(dismantleButton);
+}
+
+function selectedCraftingRecipe(): CraftingRecipe {
+  return {
+    tier: craftingTier.value as CraftingRecipe['tier'],
+    type: craftingType.value as CraftingRecipe['type'],
+    level: Number(craftingLevel.value),
+  };
+}
+
+function renderCrafting(state: UiState): void {
+  const crafting = artisanMode === 'crafting';
+  artisanEquipmentWorkbench.hidden = crafting;
+  craftingWorkbench.hidden = !crafting;
+  artisanEquipmentTab.setAttribute('aria-selected', String(!crafting));
+  artisanCraftingTab.setAttribute('aria-selected', String(crafting));
+  const previousLevel = craftingLevel.value;
+  craftingLevel.replaceChildren(...state.craftingLevels.map((level) => new Option(level.label, String(level.level))));
+  if (state.craftingLevels.some((entry) => String(entry.level) === previousLevel)) craftingLevel.value = previousLevel;
+  const recipe = selectedCraftingRecipe();
+  const cost = getCraftingCost(recipe.tier, recipe.level);
+  const quantity = state.refinedMaterials.find((entry) => entry.type === cost.materialType)?.quantity ?? 0;
+  craftingPreviewTitle.className = `tier-${recipe.tier}`;
+  craftingPreviewTitle.textContent = `${equipmentTierLabel(recipe.tier)}${recipe.type === 'weapon' ? '武器' : '护甲'} · Lv.${recipe.level}`;
+  craftingPreviewPower.textContent = `原始${recipe.type === 'weapon' ? '攻击' : '防御'} +${5 + Math.ceil(recipe.level * 0.8)}`;
+  craftingPreviewAffix.textContent = recipe.tier === 'gold' ? '无附加词条'
+    : recipe.tier === 'dark-gold' && recipe.type === 'armor' ? '不朽词条 · 生命上限'
+    : recipe.tier === 'purple' ? '随机附加词条 · 随机套装' : '随机附加词条';
+  craftingMaterialCost.textContent = `${cost.materialName} ${cost.quantity}（持有 ${quantity}）`;
+  craftingGoldCost.textContent = `${cost.gold}（持有 ${state.bankedGold}）`;
+  craftingMaterialCost.classList.toggle('is-insufficient', quantity < cost.quantity);
+  craftingGoldCost.classList.toggle('is-insufficient', state.bankedGold < cost.gold);
+  craftEquipmentButton.disabled = !state.artisanOptions || quantity < cost.quantity || state.bankedGold < cost.gold || Boolean(state.enhancementConfirmation || state.dismantleConfirmation);
+  craftingResult.hidden = !state.craftingError && !state.craftingResult;
+  craftingResult.replaceChildren();
+  if (state.craftingError) {
+    craftingResult.className = 'crafting-result is-error';
+    craftingResult.textContent = state.craftingError;
+  } else if (state.craftingResult) {
+    const item = state.craftingResult;
+    craftingResult.className = `crafting-result tier-${getEquipmentTier(item)}`;
+    const name = document.createElement('strong');
+    name.textContent = `已入库 · ${item.name} · Lv.${item.craftingLevel}`;
+    const stats = document.createElement('span');
+    stats.textContent = `${item.type === 'weapon' ? '攻击' : '防御'} +${item.power} · 评分 ${getEquipmentScore(item.type, item)}`;
+    craftingResult.append(name, stats);
+    for (const affix of item.affixes ?? []) {
+      const row = document.createElement('span');
+      row.textContent = affixText(affix);
+      craftingResult.append(row);
+    }
+    if (item.setName) {
+      const row = document.createElement('span');
+      row.textContent = `套装 · ${item.setName}${item.setBonus ? ` · ${affixText(item.setBonus)}` : ''}`;
+      craftingResult.append(row);
+    }
+  }
 }
 
 function formatStatRange(range: { min: number; max: number }): string {
@@ -955,6 +1067,23 @@ dismissTownLoadoutButton.addEventListener('click', () => sendCommand({ action: '
 dismissArtisanButton.addEventListener('click', () => sendCommand({ action: 'dismiss-artisan' }));
 dismissEnhancementConfirmationButton.addEventListener('click', () => sendCommand({ action: 'dismiss-enhancement-confirmation' }));
 confirmEnhancementButton.addEventListener('click', () => sendCommand({ action: 'confirm-enhancement' }));
+dismissDismantleButton.addEventListener('click', () => sendCommand({ action: 'dismiss-dismantle' }));
+confirmDismantleButton.addEventListener('click', () => sendCommand({ action: 'confirm-dismantle' }));
+artisanEquipmentTab.addEventListener('click', () => {
+  artisanMode = 'equipment';
+  if (currentArtisanState) renderCrafting(currentArtisanState);
+});
+artisanCraftingTab.addEventListener('click', () => {
+  artisanMode = 'crafting';
+  if (currentArtisanState) renderCrafting(currentArtisanState);
+});
+for (const select of [craftingTier, craftingType, craftingLevel]) {
+  select.addEventListener('change', () => { if (currentArtisanState) renderCrafting(currentArtisanState); });
+}
+craftEquipmentButton.addEventListener('click', () => {
+  craftEquipmentButton.disabled = true;
+  sendCommand({ action: 'craft-equipment', recipe: selectedCraftingRecipe() });
+});
 dismissBestiaryButton.addEventListener('click', () => sendCommand({ action: 'dismiss-bestiary' }));
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
 normalRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'normal' }));

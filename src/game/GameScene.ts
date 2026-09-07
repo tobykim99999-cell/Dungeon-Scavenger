@@ -45,6 +45,14 @@ import {
   type BossSkillDefinition,
 } from './bossSkills';
 import { createBestiaryRegions } from './bestiary';
+import { craftStoredEquipment, getCraftingLevels, type CraftingRecipe } from './crafting';
+import {
+  dismantleStoredEquipment,
+  getDismantleReward,
+  parseRefinedMaterials,
+  REFINED_MATERIAL_VAULT_KEY,
+  type RefinedMaterialBalance,
+} from './dismantling';
 import {
   getAdventureDifficultyFloor,
   getHeroicDifficultyFloor,
@@ -141,6 +149,7 @@ import {
   type BestiaryRegion,
   type Chest,
   type DiscardCandidate,
+  type DismantleConfirmation,
   type Enemy,
   type Equipment,
   type EquipmentAffix,
@@ -259,12 +268,16 @@ export class GameScene extends Phaser.Scene {
   private pendingMaterials: TownMaterialBalance[] = [];
   private vault: VaultEquipment[] = [];
   private townMaterials: TownMaterialBalance[] = [];
+  private refinedMaterials: RefinedMaterialBalance[] = [];
   private townLoadout: TownLoadoutSelection = {};
   private townLoadoutOptions: TownLoadoutOption[] | null = null;
   private artisanOptions: ArtisanOption[] | null = null;
   private artisanSelectedId: string | null = null;
   private enhancementConfirmation: EnhancementConfirmation | null = null;
   private enhancementResult: EnhancementResult | null = null;
+  private dismantleConfirmation: DismantleConfirmation | null = null;
+  private craftingResult: VaultEquipment | null = null;
+  private craftingError: string | null = null;
   private bestiaryRegions: BestiaryRegion[] | null = null;
   private regionOptions: RegionOption[] | null = null;
   private regionMapMode: AdventureMode = 'normal';
@@ -401,23 +414,17 @@ export class GameScene extends Phaser.Scene {
       } else if (event.code === 'KeyE') {
         this.handleCommand({ action: 'escape' });
       } else if (event.code === 'Escape') {
-        this.handleCommand({
-          action: this.bossExitChoice
-            ? 'dismiss-boss-exit-choice'
-            : (this.enhancementConfirmation
-            ? 'dismiss-enhancement-confirmation'
-            : (this.discardCandidate
-            ? 'dismiss-discard'
-            : (this.merchantOffers
-            ? 'dismiss-merchant'
-            : (this.artisanOptions
-            ? 'dismiss-artisan'
-            : (this.bestiaryRegions
-            ? 'dismiss-bestiary'
-            : (this.regionOptions
-            ? 'dismiss-region-map'
-            : (this.townLoadoutOptions ? 'dismiss-town-loadout' : 'dismiss-gilding'))))))),
-        });
+        let action: GameCommand['action'] = 'dismiss-gilding';
+        if (this.bossExitChoice) action = 'dismiss-boss-exit-choice';
+        else if (this.enhancementConfirmation) action = 'dismiss-enhancement-confirmation';
+        else if (this.dismantleConfirmation) action = 'dismiss-dismantle';
+        else if (this.discardCandidate) action = 'dismiss-discard';
+        else if (this.merchantOffers) action = 'dismiss-merchant';
+        else if (this.artisanOptions) action = 'dismiss-artisan';
+        else if (this.bestiaryRegions) action = 'dismiss-bestiary';
+        else if (this.regionOptions) action = 'dismiss-region-map';
+        else if (this.townLoadoutOptions) action = 'dismiss-town-loadout';
+        this.handleCommand({ action });
       }
     });
     keyboard.on('keyup', (event: KeyboardEvent) => {
@@ -687,7 +694,21 @@ export class GameScene extends Phaser.Scene {
       else this.emitUiState();
       return;
     }
+    if (command.action === 'dismiss-dismantle') {
+      this.dismantleConfirmation = null;
+      this.emitUiState();
+      return;
+    }
+    if (command.action === 'confirm-dismantle') {
+      this.confirmDismantle();
+      return;
+    }
     if (this.enhancementConfirmation) return;
+    if (this.dismantleConfirmation) return;
+    if (command.action === 'request-dismantle') {
+      this.requestDismantle(command.targetId);
+      return;
+    }
     if (command.action === 'dismiss-bestiary') {
       this.bestiaryRegions = null;
       this.emitUiState();
@@ -698,6 +719,7 @@ export class GameScene extends Phaser.Scene {
       this.artisanOptions = null;
       this.artisanSelectedId = null;
       this.enhancementResult = null;
+      this.dismantleConfirmation = null;
       this.emitUiState();
       return;
     }
@@ -707,6 +729,10 @@ export class GameScene extends Phaser.Scene {
     }
     if (command.action === 'enhance-equipment') {
       this.requestEnhancement(command.targetId);
+      return;
+    }
+    if (command.action === 'craft-equipment') {
+      this.craftEquipment(command.recipe);
       return;
     }
     if (this.artisanOptions) return;
@@ -858,6 +884,7 @@ export class GameScene extends Phaser.Scene {
     this.artisanSelectedId = null;
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
+    this.dismantleConfirmation = null;
     this.bestiaryRegions = null;
     this.regionOptions = null;
     this.merchantOffers = null;
@@ -895,6 +922,7 @@ export class GameScene extends Phaser.Scene {
     this.artisanSelectedId = null;
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
+    this.dismantleConfirmation = null;
     this.bestiaryRegions = null;
     this.regionOptions = null;
     this.merchantOffers = null;
@@ -2524,6 +2552,7 @@ export class GameScene extends Phaser.Scene {
     this.vault = parseGildedVault(localStorage.getItem(GILDED_VAULT_KEY));
     this.townLoadout = parseTownLoadout(localStorage.getItem(TOWN_LOADOUT_KEY));
     this.townMaterials = parseMaterialVault(localStorage.getItem(MATERIAL_VAULT_KEY));
+    this.refinedMaterials = parseRefinedMaterials(localStorage.getItem(REFINED_MATERIAL_VAULT_KEY));
 
     const legacy = parseGildedLoadout(localStorage.getItem(GILDED_LOADOUT_KEY));
     const migrated = mergeGildedEquipment(this.vault, legacy);
@@ -2573,6 +2602,7 @@ export class GameScene extends Phaser.Scene {
           setName: selectedWeapon.setName,
           setBonus: selectedWeapon.setBonus ? { ...selectedWeapon.setBonus } : undefined,
           enhancementLevel: getEnhancementLevel(selectedWeapon),
+          craftingLevel: selectedWeapon.craftingLevel,
         }
       : { name: '缺口短剑', power: 2, rarity: 'common', tier: 'common' };
     this.armor = selectedArmor
@@ -2588,6 +2618,7 @@ export class GameScene extends Phaser.Scene {
           setName: selectedArmor.setName,
           setBonus: selectedArmor.setBonus ? { ...selectedArmor.setBonus } : undefined,
           enhancementLevel: getEnhancementLevel(selectedArmor),
+          craftingLevel: selectedArmor.craftingLevel,
         }
       : { name: '旧皮甲', power: 1, rarity: 'common', tier: 'common' };
   }
@@ -2632,6 +2663,7 @@ export class GameScene extends Phaser.Scene {
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
         enhancementLevel: getEnhancementLevel(item),
         score: getEquipmentScore(item.type, item),
+        craftingLevel: item.craftingLevel,
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
@@ -2649,9 +2681,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   private openArtisan(): void {
+    this.loadTownStorage();
+    this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
+    this.highestUnlockedRegion = parseRegionProgress(localStorage.getItem(REGION_PROGRESS_KEY));
+    this.heroicUnlocked = parseHeroicUnlock(localStorage.getItem(HEROIC_UNLOCK_KEY));
+    this.craftingResult = null;
+    this.craftingError = null;
     this.artisanSelectedId = null;
     this.enhancementConfirmation = null;
     this.enhancementResult = null;
+    this.dismantleConfirmation = null;
     this.refreshArtisanOptions();
     this.artisanSelectedId = this.artisanOptions?.[0]?.targetId ?? null;
     this.emitUiState();
@@ -2671,6 +2710,8 @@ export class GameScene extends Phaser.Scene {
       const enhancementLevel = Math.min(getEnhancementLevel(item), maxLevel);
       const nextCost = getEnhancementCost(tier, enhancementLevel + 1);
       const gain = getEnhancementGain(item.type, tier);
+      const dismantleReward = getDismantleReward(item);
+      if (!dismantleReward) return [];
       return [{
         targetId: item.id,
         name: item.name,
@@ -2689,6 +2730,9 @@ export class GameScene extends Phaser.Scene {
         equipped: item.type === 'weapon'
           ? this.townLoadout.weaponId === item.id
           : this.townLoadout.armorId === item.id,
+        dismantleMaterialName: dismantleReward.name,
+        dismantleQuantity: dismantleReward.quantity,
+        craftingLevel: item.craftingLevel,
       }];
     }).sort((left, right) =>
       Number(right.equipped) - Number(left.equipped) ||
@@ -2981,6 +3025,81 @@ export class GameScene extends Phaser.Scene {
     return true;
   }
 
+  private requestDismantle(targetId: string): void {
+    if (this.status !== 'town' || !this.artisanOptions?.some((option) => option.targetId === targetId)) return;
+    const equipment = this.vault.find((item) => item.id === targetId);
+    if (!equipment) return;
+    const tier = getEquipmentTier(equipment);
+    if (tier === 'common') return;
+    const reward = getDismantleReward(equipment);
+    if (!reward || this.enhancementConfirmation || this.dismantleConfirmation) return;
+    this.dismantleConfirmation = {
+      targetId,
+      name: equipment.name,
+      tier,
+      equipped: equipment.type === 'weapon'
+        ? this.townLoadout.weaponId === equipment.id
+        : this.townLoadout.armorId === equipment.id,
+      reward,
+    };
+    this.emitUiState();
+  }
+
+  private craftEquipment(recipe: CraftingRecipe): void {
+    if (this.status !== 'town' || !this.artisanOptions || this.dismantleConfirmation || this.enhancementConfirmation) return;
+    this.craftingResult = null;
+    this.craftingError = null;
+    try {
+      const result = craftStoredEquipment(localStorage, recipe, (regionIndex) =>
+        this.createItem(recipe.type, 'rare', recipe.tier, recipe.level, regionIndex),
+      );
+      this.vault = result.vault;
+      this.refinedMaterials = result.materials;
+      this.bankedGold = result.bankedGold;
+      this.craftingResult = result.equipment;
+      this.refreshArtisanOptions();
+      this.artisanSelectedId = result.equipment.id;
+      this.pushLog(`打造完成：Lv.${recipe.level} ${equipmentTierLabel(recipe.tier)} ${result.equipment.name}已入库。`);
+      this.playSound('equip', 0.5);
+    } catch (error) {
+      this.craftingError = error instanceof Error ? error.message : '打造未完成，请重试。';
+      this.pushLog(this.craftingError);
+      this.loadTownStorage();
+      this.bankedGold = Number.parseInt(localStorage.getItem('abyss-banked-gold') ?? '0', 10) || 0;
+      this.refreshArtisanOptions();
+    }
+    this.emitUiState();
+  }
+
+  private confirmDismantle(): void {
+    const confirmation = this.dismantleConfirmation;
+    if (this.status !== 'town' || !this.artisanOptions || !confirmation || this.enhancementConfirmation) return;
+    this.dismantleConfirmation = null;
+    const previousMaxHp = this.totalMaxHp;
+    try {
+      const result = dismantleStoredEquipment(localStorage, confirmation.targetId);
+      if (!result) {
+        this.pushLog('该装备已不在仓库或无法分解。');
+        this.loadTownStorage();
+      } else {
+        this.vault = result.vault;
+        this.townLoadout = result.loadout;
+        this.refinedMaterials = result.materials;
+        this.pushLog(`${result.equipment.name}已分解为 ${result.reward.name} ×${result.reward.quantity}。`);
+        if (confirmation.equipped) this.pushLog('已卸下分解装备，对应部位恢复初始装备。');
+        this.playSound('equip', 0.5);
+      }
+    } catch {
+      this.pushLog('分解存档写入失败，未完成分解。请检查浏览器存储后重试。');
+    }
+    this.applyTownLoadout();
+    this.adjustHealthForEquipmentChange(previousMaxHp);
+    this.enhancementResult = null;
+    this.refreshArtisanOptions();
+    this.artisanSelectedId = this.artisanOptions?.[0]?.targetId ?? null;
+    this.emitUiState();
+  }
+
   private animatePremiumPickup(item: Item, origin: Point): void {
     if (item.type !== 'weapon' && item.type !== 'armor') return;
     const tier = getEquipmentTier(item);
@@ -3012,6 +3131,7 @@ export class GameScene extends Phaser.Scene {
       setName: item.setName,
       setBonus: item.setBonus ? { ...item.setBonus } : undefined,
       enhancementLevel: getEnhancementLevel(item),
+      craftingLevel: item.craftingLevel,
     });
   }
 
@@ -3136,6 +3256,7 @@ export class GameScene extends Phaser.Scene {
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
         enhancementLevel: getEnhancementLevel(item),
+        craftingLevel: item.craftingLevel,
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('weapon', old));
@@ -3157,6 +3278,7 @@ export class GameScene extends Phaser.Scene {
         setName: item.setName,
         setBonus: item.setBonus ? { ...item.setBonus } : undefined,
         enhancementLevel: getEnhancementLevel(item),
+        craftingLevel: item.craftingLevel,
       };
       this.inventory.splice(index, 1);
       this.inventory.push(this.equipmentAsItem('armor', old));
@@ -3378,6 +3500,7 @@ export class GameScene extends Phaser.Scene {
       setName: equipment.setName,
       setBonus: equipment.setBonus ? { ...equipment.setBonus } : undefined,
       enhancementLevel: getEnhancementLevel(equipment),
+      craftingLevel: equipment.craftingLevel,
     };
   }
 
@@ -3582,6 +3705,11 @@ export class GameScene extends Phaser.Scene {
       artisanSelectedId: this.artisanSelectedId,
       enhancementConfirmation: this.enhancementConfirmation ? { ...this.enhancementConfirmation } : null,
       enhancementResult: this.enhancementResult ? { ...this.enhancementResult } : null,
+      dismantleConfirmation: this.dismantleConfirmation ? { ...this.dismantleConfirmation, reward: { ...this.dismantleConfirmation.reward } } : null,
+      refinedMaterials: this.refinedMaterials.map((material) => ({ ...material })),
+      craftingLevels: getCraftingLevels(this.highestUnlockedRegion, this.heroicUnlocked),
+      craftingResult: this.craftingResult,
+      craftingError: this.craftingError,
       bestiaryRegions: this.bestiaryRegions?.map((region) => ({
         ...region,
         enemies: region.enemies.map((enemy) => ({ ...enemy })),

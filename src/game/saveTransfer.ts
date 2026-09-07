@@ -6,6 +6,7 @@ import {
 import { HEROIC_UNLOCK_KEY } from './heroic';
 import { MATERIAL_VAULT_KEY } from './materials';
 import { REGION_PROGRESS_KEY } from './regions';
+import { REFINED_MATERIAL_VAULT_KEY } from './dismantling';
 
 export const SAVE_BACKUP_FORMAT = 'abyss-scavenger-save';
 export const SAVE_BACKUP_VERSION = 1;
@@ -16,6 +17,7 @@ export const SAVE_STORAGE_KEYS = [
   GILDED_VAULT_KEY,
   TOWN_LOADOUT_KEY,
   MATERIAL_VAULT_KEY,
+  REFINED_MATERIAL_VAULT_KEY,
   REGION_PROGRESS_KEY,
   HEROIC_UNLOCK_KEY,
 ] as const;
@@ -59,7 +61,9 @@ export function parseSaveBackup(value: unknown): SaveBackup | null {
   const rawData = candidate.data as Record<string, unknown>;
   const data = {} as Record<SaveStorageKey, string | null>;
   for (const key of SAVE_STORAGE_KEYS) {
-    const storedValue = rawData[key];
+    const storedValue = key === REFINED_MATERIAL_VAULT_KEY && !Object.hasOwn(rawData, key)
+      ? null
+      : rawData[key];
     if (storedValue !== null && typeof storedValue !== 'string') return null;
     data[key] = storedValue;
   }

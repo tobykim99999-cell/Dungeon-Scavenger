@@ -118,20 +118,51 @@
               </button>
               <div class="gilding-emblem artisan-emblem"><i data-lucide="hammer" aria-hidden="true"></i></div>
               <p>灰炉镇锻炉</p>
-              <h2 id="artisan-title">装备强化</h2>
+              <h2 id="artisan-title">工匠铺</h2>
               <div class="artisan-balance">
                 <i data-lucide="coins" aria-hidden="true"></i>
                 <span>入库古币</span>
                 <strong id="artisan-banked-gold">0</strong>
               </div>
-              <div class="artisan-workbench">
+              <div id="artisan-refined-materials" class="artisan-refined-materials"></div>
+              <div class="artisan-mode" role="tablist" aria-label="工匠业务">
+                <button id="artisan-equipment-tab" type="button" role="tab" aria-selected="true" aria-controls="artisan-equipment-workbench"><i data-lucide="hammer" aria-hidden="true"></i>强化与分解</button>
+                <button id="artisan-crafting-tab" type="button" role="tab" aria-selected="false" aria-controls="crafting-workbench"><i data-lucide="anvil" aria-hidden="true"></i>打造装备</button>
+              </div>
+              <div id="artisan-equipment-workbench" class="artisan-workbench" role="tabpanel" aria-labelledby="artisan-equipment-tab">
                 <section class="artisan-equipment-list">
                   <div class="artisan-section-heading">选择装备</div>
                   <div id="artisan-options" class="artisan-options"></div>
                 </section>
                 <section class="artisan-enhancement-panel">
-                  <div class="artisan-section-heading">强化详情</div>
+                  <div class="artisan-section-heading">装备处理</div>
                   <div id="artisan-detail" class="artisan-detail"></div>
+                </section>
+              </div>
+              <div id="crafting-workbench" class="crafting-workbench" role="tabpanel" aria-labelledby="artisan-crafting-tab" hidden>
+                <section class="crafting-recipe">
+                  <label for="crafting-tier">装备品质</label>
+                  <select id="crafting-tier">
+                    <option value="gold">金装 · 金属碎片</option>
+                    <option value="dark-gold">暗金 · 暗金核心</option>
+                    <option value="purple">紫装 · 套装碎片</option>
+                  </select>
+                  <label for="crafting-type">装备部位</label>
+                  <select id="crafting-type"><option value="weapon">武器</option><option value="armor">护甲</option></select>
+                  <label for="crafting-level">打造等级</label>
+                  <select id="crafting-level"></select>
+                </section>
+                <section class="crafting-preview">
+                  <h3 id="crafting-preview-title"></h3>
+                  <p id="crafting-preview-power"></p>
+                  <p id="crafting-preview-affix"></p>
+                  <dl class="crafting-costs">
+                    <div><dt>材料费用</dt><dd id="crafting-material-cost"></dd></div>
+                    <div><dt>古币费用</dt><dd id="crafting-gold-cost"></dd></div>
+                    <div><dt>成品强化</dt><dd>+0</dd></div>
+                  </dl>
+                  <button id="craft-equipment-button" class="artisan-enhance-button" type="button"><i data-lucide="anvil" aria-hidden="true"></i><span>打造装备</span></button>
+                  <div id="crafting-result" role="status" hidden></div>
                 </section>
               </div>
               <div id="enhancement-confirmation" class="enhancement-confirmation" hidden role="alertdialog" aria-modal="true" aria-labelledby="enhancement-confirmation-title">
@@ -145,6 +176,20 @@
                   <button id="confirm-enhancement-button" class="artisan-confirm-button" type="button">
                     <i data-lucide="hammer" aria-hidden="true"></i>
                     继续强化
+                  </button>
+                </div>
+              </div>
+              <div id="dismantle-confirmation" class="enhancement-confirmation dismantle-confirmation" hidden role="alertdialog" aria-modal="true" aria-labelledby="dismantle-confirmation-title">
+                <div class="enhancement-confirmation-emblem dismantle-confirmation-emblem"><i data-lucide="recycle" aria-hidden="true"></i></div>
+                <p>装备分解确认</p>
+                <h3 id="dismantle-confirmation-title">永久拆解</h3>
+                <strong id="dismantle-confirmation-item"></strong>
+                <span id="dismantle-confirmation-copy"></span>
+                <div class="enhancement-confirmation-actions">
+                  <button id="dismiss-dismantle-button" class="secondary-button" type="button">取消</button>
+                  <button id="confirm-dismantle-button" class="danger-button" type="button">
+                    <i data-lucide="recycle" aria-hidden="true"></i>
+                    确认分解
                   </button>
                 </div>
               </div>

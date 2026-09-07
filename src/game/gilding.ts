@@ -113,6 +113,7 @@ export function parseGildedVault(value: string | null): VaultEquipment[] {
         setName: candidate.setName,
         setBonus: parseAffix(candidate.setBonus),
         ...parseEnhancementLevel(candidate.enhancementLevel),
+        ...parseCraftingLevel(candidate.craftingLevel),
       }];
     });
   } catch {
@@ -243,6 +244,11 @@ function parseEnhancementLevel(value: unknown): Pick<Equipment, 'enhancementLeve
   if (typeof value !== 'number' || !Number.isFinite(value)) return {};
   const enhancementLevel = Math.max(0, Math.floor(value));
   return enhancementLevel > 0 ? { enhancementLevel } : {};
+}
+
+function parseCraftingLevel(value: unknown): Pick<Equipment, 'craftingLevel'> {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= 125
+    ? { craftingLevel: value } : {};
 }
 
 function parseAffix(value: unknown): Equipment['setBonus'] {

@@ -2,6 +2,9 @@ import type Phaser from 'phaser';
 import type { BossSkillId } from './bossSkills';
 import type { EliteAffix } from './elite';
 import type { PlayerSkillId } from './playerSkills';
+import type { RefinedMaterialBalance } from './dismantling';
+import type { CraftingLevel, CraftingRecipe } from './crafting';
+import type { VaultEquipment } from './gilding';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
 export type AdventureMode = 'normal' | 'heroic';
@@ -29,6 +32,7 @@ export interface Item {
   setBonus?: EquipmentAffix;
   enhancementLevel?: number;
   materialRegion?: number;
+  craftingLevel?: number;
 }
 
 export interface Equipment {
@@ -43,6 +47,7 @@ export interface Equipment {
   setName?: string;
   setBonus?: EquipmentAffix;
   enhancementLevel?: number;
+  craftingLevel?: number;
 }
 
 export interface EquipmentAffix {
@@ -82,6 +87,7 @@ export interface TownLoadoutOption {
   score: number;
   equipped: boolean;
   starter: boolean;
+  craftingLevel?: number;
 }
 
 export interface ArtisanOption {
@@ -100,6 +106,9 @@ export interface ArtisanOption {
   successChance: number;
   equipped: boolean;
   score: number;
+  dismantleMaterialName: string;
+  dismantleQuantity: number;
+  craftingLevel?: number;
 }
 
 export interface EnhancementConfirmation {
@@ -148,6 +157,14 @@ export interface MerchantReveal {
   power: number;
   tier: EquipmentTier;
   score: number;
+}
+
+export interface DismantleConfirmation {
+  targetId: string;
+  name: string;
+  tier: EquipmentTier;
+  equipped: boolean;
+  reward: RefinedMaterialBalance;
 }
 
 export interface LootAnimationDetail {
@@ -271,6 +288,11 @@ export interface UiState {
   artisanSelectedId: string | null;
   enhancementConfirmation: EnhancementConfirmation | null;
   enhancementResult: EnhancementResult | null;
+  dismantleConfirmation: DismantleConfirmation | null;
+  refinedMaterials: RefinedMaterialBalance[];
+  craftingLevels: CraftingLevel[];
+  craftingResult: VaultEquipment | null;
+  craftingError: string | null;
   bestiaryRegions: BestiaryRegion[] | null;
   regionOptions: RegionOption[] | null;
   regionMapMode: AdventureMode;
@@ -330,6 +352,10 @@ export type GameCommand =
   | { action: 'confirm-enhancement' }
   | { action: 'dismiss-enhancement-confirmation' }
   | { action: 'dismiss-artisan' }
+  | { action: 'request-dismantle'; targetId: string }
+  | { action: 'craft-equipment'; recipe: CraftingRecipe }
+  | { action: 'confirm-dismantle' }
+  | { action: 'dismiss-dismantle' }
   | { action: 'dismiss-bestiary' }
   | { action: 'select-region-mode'; mode: AdventureMode }
   | { action: 'start-region'; regionIndex: number; mode: AdventureMode }

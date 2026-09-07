@@ -7,6 +7,7 @@ import {
   parseSaveBackup,
   restoreSaveBackup,
 } from '../src/game/saveTransfer';
+import { REFINED_MATERIAL_VAULT_KEY } from '../src/game/dismantling';
 
 function createMemoryStorage(entries: Record<string, string> = {}) {
   const values = new Map(Object.entries(entries));
@@ -19,6 +20,24 @@ function createMemoryStorage(entries: Record<string, string> = {}) {
 }
 
 describe('save transfer', () => {
+  it('imports older backups without the new dismantling material key', () => {
+    const backup = createSaveBackup(createMemoryStorage({ 'abyss-banked-gold': '860' }));
+    const legacyData: Record<string, string | null> = { ...backup.data };
+    delete legacyData[REFINED_MATERIAL_VAULT_KEY];
+    const parsed = parseSaveBackup({ ...backup, data: legacyData });
+    expect(parsed?.data['abyss-banked-gold']).toBe('860');
+    expect(parsed?.data[REFINED_MATERIAL_VAULT_KEY]).toBeNull();
+  });
+
+  it('preserves refined material balances through export and import', () => {
+    const value = '[{"type":"set-fragment","name":"套装碎片","quantity":10}]';
+    const backup = parseSaveBackup(JSON.parse(JSON.stringify(createSaveBackup(
+      createMemoryStorage({ [REFINED_MATERIAL_VAULT_KEY]: value }),
+    ))))!;
+    const target = createMemoryStorage();
+    restoreSaveBackup(target, backup);
+    expect(target.getItem(REFINED_MATERIAL_VAULT_KEY)).toBe(value);
+  });
   it('exports only the owned persistent save keys', () => {
     const storage = createMemoryStorage({
       'abyss-banked-gold': '860',
