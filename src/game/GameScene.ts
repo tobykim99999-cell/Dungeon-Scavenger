@@ -16,6 +16,22 @@ import {
 } from './dungeon';
 import { computeFieldOfView } from './fov';
 import {
+  TRIAL_BOSS_NAME, TRIAL_CENTER, TRIAL_PILLARS,
+  advanceTrialWarden, createTrialSnapshot, createTrialWarden, generateTrialArena,
+  getTrialChargeLanding, getTrialReceivedDamage, getTrialSkillDamage,
+  getTrialWardenDefense, getTrialWardenStatus, planTrialCharge, startTrialCharge,
+  type TrialSnapshot,
+} from './trial';
+import {
+  SECOND_BOSS_TRIAL_TURNS,
+  advanceSecondBossTrial,
+  getSecondBossGuardianStats,
+  getSecondBossStormSpawns,
+  getSecondBossTrialCorners,
+  getStormStep,
+  shouldStartSecondBossTrial,
+} from './secondBossTrial';
+import {
   ELITE_AFFIXES,
   getEliteBulwarkShield,
   getEliteFrenzyAttack,
@@ -25,6 +41,7 @@ import {
   shouldSpawnHeroicElite,
 } from './elite';
 import {
+  FIRST_BOSS_CONTROL_TURNS,
   FOURTH_BOSS_BURN_TURNS,
   FOURTH_BOSS_CONTROL_TURNS,
   FOURTH_BOSS_HEAL_TURNS,
@@ -39,6 +56,7 @@ import {
   getBossSkillTiles,
   resolveShieldDamage,
   shouldEnterBossSecondPhase,
+  shouldStartFirstBossAssault,
   shouldStartFourthBossHealing,
   getThirdBossReleaseSummonCount,
   THIRD_BOSS_SUMMON_CAP,
@@ -242,6 +260,7 @@ export class GameScene extends Phaser.Scene {
   private inTown = false;
   private floor = 1;
   private adventureMode: AdventureMode = 'normal';
+  private trialSnapshot?: TrialSnapshot;
   private gold = 0;
   private bankedGold = 0;
   private player: PlayerState = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
@@ -297,6 +316,9 @@ export class GameScene extends Phaser.Scene {
   private playerSkillCooldowns: PlayerSkillCooldowns = createPlayerSkillCooldowns();
   private chargedStrikeReady = false;
   private guardReady = false;
+  private trialVisual?: Phaser.GameObjects.Container;
+  private trialCounter?: Phaser.GameObjects.Text;
+  private stormWinds: Array<Point & { effect: Phaser.GameObjects.Container }> = [];
 
   private mapGroup!: Phaser.GameObjects.Group;
   private objectGroup!: Phaser.GameObjects.Group;
@@ -555,6 +577,7 @@ export class GameScene extends Phaser.Scene {
     if (
       !combatTarget &&
       this.status === 'active' &&
+      !(this.adventureMode === 'trial' && this.autoMoveHistory.length === 1) &&
       this.enemies.some((enemy) => this.distance(enemy, this.player) === 1)
     ) {
       this.cancelAutoMove();
@@ -655,6 +678,7 @@ export class GameScene extends Phaser.Scene {
       this.cancelAutoMove();
     }
     if (command.action === 'start') {
+      if (this.status === 'active' && this.bossStage && !this.bossDefeated) return;
       this.enterTown('整备之后，再从矿门出发。');
       return;
     }
@@ -868,14 +892,22 @@ export class GameScene extends Phaser.Scene {
     this.inTown = false;
     this.adventureMode = mode;
     this.floor = startFloor;
-    this.bossStage = false;
+    this.bossStage = mode === 'trial';
     this.bossExitChoice = false;
     this.gold = 0;
     this.player = { x: 0, y: 0, hp: 24, maxHp: 24, baseAttack: 2, baseDefense: 0 };
     this.loadTownStorage();
     this.applyTownLoadout();
     this.player.hp = this.totalMaxHp;
+    this.trialSnapshot = mode === 'trial' ? this.getTrialSnapshot() : undefined;
     this.inventory = [];
+    if (this.trialSnapshot) {
+      const power = Math.ceil(this.totalMaxHp * 0.3);
+      this.inventory.push({
+        id: 'trial-potion', type: 'potion', name: '试炼补给药', quantity: 2,
+        description: `恢复 ${power} 点生命`, power, rarity: 'uncommon',
+      });
+    }
     this.pendingGilded = [];
     this.pendingMaterials = [];
     this.gildingOptions = null;
@@ -907,6 +939,7 @@ export class GameScene extends Phaser.Scene {
     this.status = 'town';
     this.inTown = true;
     this.adventureMode = 'normal';
+    this.trialSnapshot = undefined;
     this.floor = 1;
     this.bossStage = false;
     this.bossDefeated = true;
@@ -956,24 +989,33 @@ export class GameScene extends Phaser.Scene {
   private buildLevel(): void {
     this.clearLevel();
     const seed = (Date.now() ^ (this.floor * 0x9e3779b1) ^ Math.floor(this.random.next() * 0xffffffff)) >>> 0;
-    this.dungeon = this.bossStage ? generateBossArena(seed) : generateDungeon(seed);
+    this.dungeon = this.adventureMode === 'trial'
+      ? generateTrialArena(seed)
+      : this.bossStage ? generateBossArena(seed) : generateDungeon(seed);
+    if (this.adventureMode === 'trial') {
+      this.cameras.main.setZoom(1.3).centerOn(TRIAL_CENTER.x * TILE_SIZE + 16, TRIAL_CENTER.y * TILE_SIZE + 16);
+    }
     this.player.x = this.dungeon.start.x;
     this.player.y = this.dungeon.start.y;
     this.explored = new Set<string>();
     this.bossDefeated = !this.bossStage;
 
     this.renderMap();
+    if (this.adventureMode === 'trial') this.renderTrialPillars();
     this.spawnLevelContent();
     this.renderActorsAndObjects();
     this.updateVision();
     this.switchBgm(this.bossStage ? 'bgm-boss' : 'bgm-dungeon');
-    if (this.bossStage) this.pushLog(`第 ${this.floor} 层守层者正在大殿中等待。`);
+    if (this.adventureMode === 'trial') this.pushLog('无尽试炼 · 镇印竞技场。断誓铁卫展开重甲，四方镇印石柱亮起。');
+    else if (this.bossStage) this.pushLog(`第 ${this.floor} 层守层者正在大殿中等待。`);
     this.emitUiState();
   }
 
   private clearLevel(): void {
+    this.cameras.main.setZoom(1).setScroll(0, 0);
     this.cancelAutoMove();
     this.stopHeldMovement();
+    this.clearSecondBossTrialVisuals();
     this.destroyPlayerControlEffect();
     for (const chest of this.chests) {
       if (chest.effect) this.tweens.killTweensOf(chest.effect.list);
@@ -981,6 +1023,8 @@ export class GameScene extends Phaser.Scene {
     for (const enemy of this.enemies) {
       this.destroyBossShield(enemy);
       this.destroyBossHealingEffect(enemy);
+      this.destroyBossRageEffect(enemy);
+      this.destroyTrialWardenEffect(enemy);
       this.destroyEliteEffect(enemy);
     }
     this.mapGroup?.clear(true, true);
@@ -1003,12 +1047,13 @@ export class GameScene extends Phaser.Scene {
 
   private renderMap(): void {
     const theme = getRegionTheme(this.floor);
+    const trial = this.adventureMode === 'trial';
     for (let y = 0; y < MAP_HEIGHT; y += 1) {
       for (let x = 0; x < MAP_WIDTH; x += 1) {
         const walkable = this.dungeon.tiles[y][x] === 1;
         const floorColor = this.inTown
           ? ((x + y) % 2 === 0 ? 0x566159 : 0x4e5952)
-          : theme.floorColors[(x + y) % 2];
+          : trial ? ((x + y) % 2 === 0 ? 0x626c6e : 0x596467) : theme.floorColors[(x + y) % 2];
         const background = this.add
           .rectangle(x * TILE_SIZE + 16, y * TILE_SIZE + 16, TILE_SIZE, TILE_SIZE, walkable ? floorColor : 0x171c20)
           .setDepth(0);
@@ -1029,7 +1074,7 @@ export class GameScene extends Phaser.Scene {
               .setDepth(1);
             this.mapGroup.add(decoration);
           }
-        } else if (this.hasAdjacentFloor(x, y)) {
+        } else if (this.hasAdjacentFloor(x, y) && !(trial && TRIAL_PILLARS.some((pillar) => pillar.x === x && pillar.y === y))) {
           const wallTile = this.add
             .sprite(x * TILE_SIZE + 16, y * TILE_SIZE + 16, 'tiny-dungeon', this.inTown ? 28 : theme.wallFrame)
             .setScale(2)
@@ -1038,6 +1083,26 @@ export class GameScene extends Phaser.Scene {
           this.mapGroup.add(wallTile);
         }
       }
+    }
+  }
+
+  private renderTrialPillars(): void {
+    for (const point of TRIAL_PILLARS) {
+      const x = point.x * TILE_SIZE + 16;
+      const y = point.y * TILE_SIZE + 16;
+      const stone = this.add.graphics().setDepth(4);
+      stone.fillStyle(0x273c40).fillRect(x - 15, y - 15, 30, 30);
+      stone.fillStyle(0x9daeb2).fillRect(x - 11, y - 19, 22, 32);
+      stone.fillStyle(0xd0dee0).fillRect(x - 14, y - 20, 28, 7);
+      stone.fillStyle(0x829499).fillRect(x - 14, y + 9, 28, 7);
+      stone.lineStyle(2, 0x3c696d).strokeRect(x - 7, y - 10, 14, 16);
+      const rune = this.add.graphics().setDepth(5).setBlendMode(Phaser.BlendModes.ADD);
+      rune.lineStyle(2, 0x82eadc).strokePoints([
+        { x, y: y - 9 }, { x: x + 5, y: y - 2 }, { x, y: y + 5 }, { x: x - 5, y: y - 2 },
+      ], true);
+      this.mapGroup.addMultiple([stone, rune]);
+      this.tweens.add({ targets: rune, alpha: { from: 0.45, to: 1 }, duration: 800, yoyo: true, repeat: -1 });
+      rune.once(Phaser.GameObjects.Events.DESTROY, () => this.tweens.killTweensOf(rune));
     }
   }
 
@@ -1201,6 +1266,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private refreshRegionOptions(): void {
+    if (this.regionMapMode === 'trial') {
+      this.regionOptions = [{
+        index: 0, name: '镇印竞技场', startFloor: 1, endFloor: 1, mode: 'trial',
+        difficultyStart: 1, difficultyEnd: 1, trialSnapshot: this.getTrialSnapshot(),
+      }];
+      return;
+    }
     const count = this.regionMapMode === 'heroic'
       ? HEROIC_REGION_COUNT
       : this.highestUnlockedRegion + 1;
@@ -1234,13 +1306,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   private unlockRegionAtFloor(floor: number): void {
-    if (this.adventureMode === 'heroic') return;
+    if (this.adventureMode !== 'normal') return;
     this.highestUnlockedRegion = unlockRegion(this.highestUnlockedRegion, floor);
     localStorage.setItem(REGION_PROGRESS_KEY, String(this.highestUnlockedRegion));
   }
 
   private spawnLevelContent(): void {
     const theme = getRegionTheme(this.floor);
+    if (this.adventureMode === 'trial' && this.trialSnapshot) {
+      const stats = this.trialSnapshot.boss;
+      this.enemies.push({
+        ...stats, ...TRIAL_CENTER, maxHp: stats.hp, id: 'trial-warden', name: TRIAL_BOSS_NAME,
+        frame: 98, tint: 0xc4dce1, scale: 2.8, alerted: true, isBoss: true,
+        trialWarden: createTrialWarden(),
+      });
+      return;
+    }
     const positions = collectWalkableTiles(this.dungeon).filter(
       (point) =>
         this.distance(point, this.dungeon.start) > 4 &&
@@ -1249,7 +1330,7 @@ export class GameScene extends Phaser.Scene {
     this.shuffle(positions);
 
     if (this.bossStage) {
-      const stats = getBossStats(this.difficultyFloor);
+      const stats = getBossStats(this.difficultyFloor, this.floor);
       this.enemies.push({
         id: `boss-${this.floor}`,
         name: theme.boss.name,
@@ -1412,6 +1493,7 @@ export class GameScene extends Phaser.Scene {
         .setDepth(7);
       this.actorGroup.add(enemy.sprite);
       if (enemy.elite) this.createEliteEffect(enemy);
+      if (enemy.trialWarden) this.refreshTrialWardenVisual(enemy);
     }
 
     this.playerSprite = this.add
@@ -1492,7 +1574,8 @@ export class GameScene extends Phaser.Scene {
       target.x === this.dungeon.exit.x &&
       target.y === this.dungeon.exit.y &&
       this.bossStage &&
-      !this.bossDefeated
+      !this.bossDefeated &&
+      this.adventureMode !== 'trial'
     ) {
       this.pushLog('通往下层的楼梯还没有出现。');
       this.emitUiState();
@@ -1517,7 +1600,11 @@ export class GameScene extends Phaser.Scene {
     this.tweenToGrid(this.playerSprite, target);
     this.playSound('step', 0.22);
 
-    if (target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y) {
+    // A trial's reserved exit is ordinary ground until the boss dies.
+    if (
+      target.x === this.dungeon.exit.x && target.y === this.dungeon.exit.y &&
+      !this.bossStage && this.adventureMode !== 'trial'
+    ) {
       const previousBossStage = this.bossStage;
       const nextStage = advanceStage(this.floor, this.bossStage);
       this.floor = nextStage.floor;
@@ -1544,6 +1631,7 @@ export class GameScene extends Phaser.Scene {
     if (this.status === 'dead') return;
     this.updateVision();
     this.runEnemyTurns();
+    this.finishSecondBossTrialTurn();
     this.updateVision();
     this.emitUiState();
   }
@@ -1624,7 +1712,7 @@ export class GameScene extends Phaser.Scene {
 
     for (const enemy of targets) {
       if (!this.enemies.some((candidate) => candidate.id === enemy.id)) continue;
-      if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
+      if (this.isEnemyInvulnerable(enemy)) {
         this.showStatusText(enemy.x, enemy.y, '无敌', '#ffd078');
         continue;
       }
@@ -1642,11 +1730,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private attackEnemy(enemy: Enemy): void {
-    if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
+    if (this.isEnemyInvulnerable(enemy)) {
       this.cancelAutoMove();
       this.playSound('hit', 0.25);
       this.showStatusText(enemy.x, enemy.y, '无敌', '#ffd078');
-      this.pushLog(`${enemy.name}正在熔火再生，当前攻击无法造成伤害。`);
+      this.pushLog(`${enemy.name}${enemy.secondBossTrial ? '处于锁血无敌状态' : '正在熔火再生'}，当前攻击无法造成伤害。`);
       return;
     }
 
@@ -1675,7 +1763,7 @@ export class GameScene extends Phaser.Scene {
       const shieldMessage = result.absorbed > 0 ? `，护盾吸收 ${result.absorbed} 点` : '';
       const healthMessage = result.healthDamage > 0 ? `，生命受到 ${result.healthDamage} 点伤害` : '';
       this.pushLog(`${chargedStrike ? '蓄力斩！' : ''}${critical ? '暴击！' : ''}你击中${enemy.name}${shieldMessage}${healthMessage}。`);
-      if (setBonus?.stat === 'bleed') {
+      if (setBonus?.stat === 'bleed' && !this.isEnemyInvulnerable(enemy)) {
         enemy.bleedDamage = setBonus.value;
         enemy.bleedTurns = 2;
         this.pushLog(`${enemy.name}陷入流血，接下来 2 回合持续受伤。`);
@@ -1688,8 +1776,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   private defeatEnemy(enemy: Enemy): void {
+    if (enemy.secondBossTrial) return;
     this.destroyBossShield(enemy);
     this.destroyBossHealingEffect(enemy);
+    this.destroyBossRageEffect(enemy);
+    this.destroyTrialWardenEffect(enemy);
     this.destroyEliteEffect(enemy);
     enemy.sprite?.destroy();
     this.enemies = this.enemies.filter((candidate) => candidate.id !== enemy.id);
@@ -1704,6 +1795,11 @@ export class GameScene extends Phaser.Scene {
     this.playSound('coins', 0.28);
 
     if (enemy.isBoss) {
+      if (getRegionIndex(this.floor) === 0) {
+        this.playerControlTurns = 0;
+        this.destroyPlayerControlEffect();
+      }
+      this.clearSecondBossTrialVisuals();
       this.pauseBgm();
       this.tweens.killTweensOf(this.bossSkillGraphics);
       this.bossSkillGraphics.clear().setAlpha(1);
@@ -1726,12 +1822,15 @@ export class GameScene extends Phaser.Scene {
       const rewardTiers = rollBossRewardTiers(rewardFloor, this.random.next(), this.random.next());
       const rewardTypes = ['weapon', 'armor'] as const;
       for (let index = 0; index < rewardTypes.length; index += 1) {
-        const reward = this.createItem(rewardTypes[index], 'rare', rewardTiers[index]);
+        const reward = this.createItem(rewardTypes[index], 'rare', rewardTiers[index],
+          this.adventureMode === 'trial' ? 10 : this.difficultyFloor);
         this.addItem(reward);
         this.animatePremiumPickup(reward, enemy);
         this.pushLog(`守层者掉落了${equipmentTierLabel(getEquipmentTier(reward))}：${reward.name}。`);
       }
-      this.pushLog('守层者倒下，通往下层的楼梯出现了。');
+      this.pushLog(this.adventureMode === 'trial'
+        ? '试炼第一层完成，回城阶梯已开启。'
+        : '守层者倒下，通往下层的楼梯出现了。');
     } else if (enemy.elite) {
       const material = this.createItem('material');
       material.quantity = this.random.integer(3, 5);
@@ -1743,7 +1842,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private runEnemyTurns(): void {
+    if (this.enemies.some((enemy) => enemy.secondBossTrial?.justTriggered)) return;
     for (const enemy of [...this.enemies]) {
+      if (enemy.secondBossTrial) continue;
       if (enemy.isBoss && (enemy.bossHealingTurns ?? 0) > 0) {
         this.runBossHealingTurn(enemy);
         continue;
@@ -1762,7 +1863,19 @@ export class GameScene extends Phaser.Scene {
           if (enemy.isBoss) return;
           continue;
         }
-        if ((enemy.bossHealingTurns ?? 0) > 0) continue;
+        if (this.isEnemyInvulnerable(enemy)) continue;
+      }
+
+      if (enemy.trialWarden) {
+        this.runTrialWardenTurn(enemy);
+        if (this.status === 'dead') return;
+        continue;
+      }
+
+      if (enemy.isBoss && (enemy.firstBossAssaultTurns ?? 0) > 0) {
+        this.runFirstBossAssaultTurn(enemy);
+        if (this.status === 'dead') return;
+        continue;
       }
 
       if (enemy.isBoss && enemy.bossSkillId) {
@@ -1788,6 +1901,7 @@ export class GameScene extends Phaser.Scene {
         continue;
       }
 
+      if (enemy.trialGuardian) continue;
       if (distance <= FOV_RADIUS || this.visible.has(`${enemy.x},${enemy.y}`)) enemy.alerted = true;
       if (!enemy.alerted || distance > 11) continue;
 
@@ -1798,6 +1912,7 @@ export class GameScene extends Phaser.Scene {
       if (enemy.sprite) this.tweenToGrid(enemy.sprite, next);
       if (enemy.shieldEffect) this.tweenToGrid(enemy.shieldEffect, next);
       if (enemy.eliteEffect) this.tweenToGrid(enemy.eliteEffect, next);
+      if (enemy.rageEffect) this.tweenToGrid(enemy.rageEffect, next);
     }
   }
 
@@ -1807,7 +1922,7 @@ export class GameScene extends Phaser.Scene {
       this.totalDefense,
       this.random.integer(0, 1),
       enemy.isBoss,
-    );
+    ) * (enemy.firstBossEnraged ? 2 : 1);
     const result = this.damagePlayer(
       damage,
       (actualDamage) => `${enemy.name}对你造成 ${actualDamage} 点伤害。`,
@@ -1888,8 +2003,8 @@ export class GameScene extends Phaser.Scene {
     }
     this.pushLog(
       this.playerControlTurns > 0
-        ? `你被陨火禁锢，无法行动，剩余 ${this.playerControlTurns} 回合。`
-        : '你挣脱了陨火禁锢。',
+        ? `你被禁锢，无法行动，剩余 ${this.playerControlTurns} 回合。`
+        : '你挣脱了禁锢。',
     );
     if (this.playerControlTurns === 0) this.fadePlayerControlEffect();
     this.finishTurn();
@@ -1910,10 +2025,12 @@ export class GameScene extends Phaser.Scene {
 
   private refreshPlayerControlVisual(): void {
     this.destroyPlayerControlEffect();
-    const ring = this.add.circle(0, 0, 23, 0xff6b36, 0.12)
-      .setStrokeStyle(3, 0xffb15c, 0.95);
-    const horizontal = this.add.rectangle(0, 0, 42, 5, 0xff7a3e, 0.7);
-    const vertical = this.add.rectangle(0, 0, 5, 42, 0xff7a3e, 0.7);
+    const rockBinding = getRegionIndex(this.floor) === 0;
+    const color = rockBinding ? 0x97c9d2 : 0xff7a3e;
+    const ring = this.add.circle(0, 0, 23, color, 0.12)
+      .setStrokeStyle(3, rockBinding ? 0xd2e4e7 : 0xffb15c, 0.95);
+    const horizontal = this.add.rectangle(0, 0, 42, 5, color, 0.7);
+    const vertical = this.add.rectangle(0, 0, 5, 42, color, 0.7);
     ring.setBlendMode(Phaser.BlendModes.ADD);
     horizontal.setBlendMode(Phaser.BlendModes.ADD);
     vertical.setBlendMode(Phaser.BlendModes.ADD);
@@ -2055,10 +2172,29 @@ export class GameScene extends Phaser.Scene {
     enemy: Enemy,
     damage: number,
   ): { absorbed: number; healthDamage: number } {
+    if (this.isEnemyInvulnerable(enemy)) return { absorbed: 0, healthDamage: 0 };
+    if (enemy.trialWarden) {
+      const healthDamage = getTrialReceivedDamage(damage, enemy.trialWarden);
+      enemy.hp -= healthDamage;
+      if (enemy.hp > 0 && enemy.hp * 2 <= enemy.maxHp && !enemy.trialWarden.secondPhase) {
+        enemy.trialWarden.secondPhase = true;
+        this.cancelAutoMove();
+        this.stopHeldMovement();
+        this.refreshTrialWardenVisual(enemy);
+        this.showStatusText(enemy.x, enemy.y, '裂地回响觉醒', '#ff9a7c');
+        this.pushLog('断誓铁卫跌至半血，冲锋后将留下延迟一回合爆发的裂地回响。');
+      }
+      return { absorbed: 0, healthDamage };
+    }
     const result = resolveShieldDamage(enemy.shield ?? 0, damage);
+    const hpBefore = enemy.hp;
     enemy.shield = result.remainingShield;
     enemy.hp -= result.healthDamage;
+    if (shouldStartSecondBossTrial(this.floor, enemy.isBoss, hpBefore, result.healthDamage) && this.startSecondBossTrial(enemy)) {
+      result.healthDamage = Math.max(0, hpBefore - 1);
+    }
     this.activateEliteFrenzy(enemy);
+    this.activateFirstBossAssault(enemy);
     this.activateFourthBossHealing(enemy);
     this.activateFifthBossSecondPhase(enemy);
     if (result.absorbed > 0 && result.remainingShield === 0) {
@@ -2066,6 +2202,408 @@ export class GameScene extends Phaser.Scene {
       this.pushLog(`${enemy.name}的${enemy.elite ? '坚甲护盾' : '虚空护盾'}破碎了。`);
     }
     return { absorbed: result.absorbed, healthDamage: result.healthDamage };
+  }
+
+  private isEnemyInvulnerable(enemy: Enemy): boolean {
+    return enemy.isBoss && ((enemy.bossHealingTurns ?? 0) > 0 || Boolean(enemy.secondBossTrial));
+  }
+
+  private getTrialSnapshot(): TrialSnapshot {
+    const bonus = resolveSetBonus(this.weapon, this.armor)?.affix;
+    return createTrialSnapshot({
+      attack: this.totalAttack, defense: this.totalDefense, maxHp: this.totalMaxHp,
+      crit: bonus?.stat === 'crit' ? bonus.value : 0,
+      bleed: bonus?.stat === 'bleed' ? bonus.value : 0,
+    });
+  }
+
+  private runTrialWardenTurn(enemy: Enemy): void {
+    const state = enemy.trialWarden!;
+    const charge = state.charge;
+    const event = advanceTrialWarden(state);
+    if (event === 'hunt') {
+      const nextCharge = state.huntActions >= 2
+        ? planTrialCharge(this.dungeon.tiles, enemy, this.player) : undefined;
+      if (nextCharge) {
+        startTrialCharge(state, nextCharge);
+        this.cancelAutoMove();
+        this.stopHeldMovement();
+        this.renderTrialWarning(enemy);
+        this.pushLog('断誓铁卫锁定冲锋路线，蓄力 2 回合。');
+      } else {
+        if (this.distance(enemy, this.player) === 1) this.enemyAttack(enemy);
+        else {
+          const next = findPathToAdjacent(this.dungeon.tiles, enemy, this.player)[0];
+          if (next) {
+            enemy.x = next.x;
+            enemy.y = next.y;
+            if (enemy.sprite) this.tweenToGrid(enemy.sprite, next);
+            if (enemy.wardenEffect) this.tweenToGrid(enemy.wardenEffect, next);
+          }
+        }
+        state.huntActions += 1;
+      }
+    } else if (event === 'charging') {
+      this.renderTrialWarning(enemy);
+    } else if (event === 'impact' && charge) {
+      const landing = getTrialChargeLanding(charge, this.player);
+      const hit = charge.tiles.some((point) => point.x === this.player.x && point.y === this.player.y);
+      enemy.x = landing.x;
+      enemy.y = landing.y;
+      if (enemy.sprite) {
+        this.tweens.killTweensOf(enemy.sprite);
+        this.tweens.add({ targets: enemy.sprite, x: landing.x * TILE_SIZE + 16,
+          y: landing.y * TILE_SIZE + 16, duration: 190, ease: 'Cubic.In' });
+      }
+      this.playTrialImpact(charge.pillar ?? landing, 0x9be7db);
+      if (hit) {
+        this.damagePlayer(getTrialSkillDamage(enemy.attack, this.totalDefense, 'charge'),
+          (damage) => `断誓冲锋命中，造成 ${damage} 点伤害。`, 'boss-skill', '冲锋');
+      } else this.pushLog('你避开了断誓冲锋。');
+      this.pushLog(charge.pillar
+        ? (state.phase === 'echo' ? '铁卫撞中镇印石柱，裂地回响即将爆发，随后进入破甲失衡。' : '铁卫撞中镇印石柱，破甲失衡 2 回合！')
+        : '铁卫撞到墙壁，没有破除重甲。');
+      this.cancelAutoMove();
+      this.stopHeldMovement();
+      this.renderTrialWarning(enemy);
+    } else if (event === 'echo' && charge) {
+      for (const point of charge.tiles) this.playTrialImpact(point, 0xff9676);
+      if (charge.tiles.some((point) => point.x === this.player.x && point.y === this.player.y)) {
+        this.damagePlayer(getTrialSkillDamage(enemy.attack, this.totalDefense, 'echo'),
+          (damage) => `裂地回响命中，造成 ${damage} 点伤害。`, 'boss-skill', '回响');
+      } else this.pushLog('你避开了裂地回响。');
+      if (state.phase === 'stagger') this.pushLog('回响消散，铁卫开始破甲失衡，持续 2 回合。');
+      this.cancelAutoMove();
+      this.stopHeldMovement();
+      this.renderTrialWarning(enemy);
+    } else if (event === 'recovered') {
+      this.pushLog('断誓铁卫重新架起重甲。');
+    }
+    enemy.defense = getTrialWardenDefense(this.trialSnapshot!.boss.defense, state);
+    // Keep the moving shield attached during ordinary pursuit.
+    if (event !== 'hunt' || state.phase === 'charge') this.refreshTrialWardenVisual(enemy);
+  }
+
+  private renderTrialWarning(enemy: Enemy): void {
+    const state = enemy.trialWarden!;
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    if (state.phase !== 'charge' && state.phase !== 'echo') return;
+    const color = state.phase === 'echo' ? 0xff9271 : 0xe77962;
+    for (const point of state.charge?.tiles ?? []) {
+      const x = point.x * TILE_SIZE;
+      const y = point.y * TILE_SIZE;
+      this.bossSkillGraphics.fillStyle(color, 0.25).fillRect(x + 2, y + 2, 28, 28)
+        .lineStyle(2, color, 0.95).strokeRect(x + 3, y + 3, 26, 26);
+      if (state.phase === 'echo') {
+        this.bossSkillGraphics.lineStyle(3, 0xffd9ac).strokePoints([
+          { x: x + 7, y: y + 2 }, { x: x + 19, y: y + 13 },
+          { x: x + 11, y: y + 21 }, { x: x + 23, y: y + 30 },
+        ]);
+      }
+    }
+    this.tweens.add({ targets: this.bossSkillGraphics, alpha: { from: 0.4, to: 1 },
+      duration: state.phase === 'echo' ? 220 : 430, yoyo: true, repeat: -1 });
+  }
+
+  private playTrialImpact(point: Point, color: number): void {
+    const blast = this.add.circle(point.x * TILE_SIZE + 16, point.y * TILE_SIZE + 16, 8, color, 0.3)
+      .setStrokeStyle(3, color, 1).setBlendMode(Phaser.BlendModes.ADD).setDepth(24);
+    this.objectGroup.add(blast);
+    this.tweens.add({ targets: blast, scale: 3, alpha: 0, duration: 400, onComplete: () => blast.destroy() });
+  }
+
+  private refreshTrialWardenVisual(enemy: Enemy): void {
+    this.destroyTrialWardenEffect(enemy);
+    const state = enemy.trialWarden!;
+    const broken = state.phase === 'stagger';
+    const color = broken ? 0x9debba : state.secondPhase ? 0xff947d : 0xa4e0e7;
+    const shield = this.add.graphics();
+    shield.fillStyle(color, 0.35).fillPoints([
+      { x: -20, y: -10 }, { x: -7, y: -10 }, { x: -8, y: 8 }, { x: -14, y: 14 }, { x: -20, y: 8 },
+    ], true);
+    shield.lineStyle(2, color).strokePoints([
+      { x: -20, y: -10 }, { x: -7, y: -10 }, { x: -8, y: 8 }, { x: -14, y: 14 }, { x: -20, y: 8 },
+    ], true);
+    if (broken) shield.lineStyle(3, 0x283c38).strokePoints([
+      { x: -12, y: -10 }, { x: -17, y: -1 }, { x: -10, y: 4 }, { x: -14, y: 14 },
+    ]);
+    const labels = { hunt: '重甲', charge: '冲锋', echo: '回响', stagger: '破甲', recovery: '停顿' };
+    const counter = this.add.text(0, -30, `${labels[state.phase]}${state.turns > 0 ? ` ${state.turns}` : ''}`, {
+      fontFamily: 'Microsoft YaHei, sans-serif', fontSize: '11px', color: `#${color.toString(16)}`,
+      backgroundColor: '#172225', padding: { x: 4, y: 2 },
+    }).setOrigin(0.5);
+    enemy.wardenEffect = this.add.container(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, [shield, counter])
+      .setDepth(10);
+    this.actorGroup.add(enemy.wardenEffect);
+    if (state.phase !== 'hunt') {
+      this.tweens.add({ targets: shield, alpha: { from: 0.4, to: 1 }, duration: 350, yoyo: true, repeat: -1 });
+    }
+    enemy.tint = broken ? 0xadeac5 : state.secondPhase ? 0xf7a98b : 0xc4dce1;
+    enemy.sprite?.setTint(enemy.tint);
+  }
+
+  private destroyTrialWardenEffect(enemy: Enemy): void {
+    if (!enemy.wardenEffect) return;
+    this.tweens.killTweensOf(enemy.wardenEffect);
+    this.tweens.killTweensOf(enemy.wardenEffect.list);
+    enemy.wardenEffect.destroy(true);
+    enemy.wardenEffect = undefined;
+  }
+
+  private activateFirstBossAssault(enemy: Enemy): void {
+    if (
+      !enemy.isBoss || (enemy.firstBossAssaultTurns ?? 0) > 0 ||
+      !shouldStartFirstBossAssault(this.floor, enemy.hp, enemy.maxHp, enemy.firstBossAssaultPhases ?? 0)
+    ) return;
+
+    enemy.firstBossAssaultPhases = (enemy.firstBossAssaultPhases ?? 0) + 1;
+    enemy.firstBossAssaultTurns = FIRST_BOSS_CONTROL_TURNS;
+    enemy.firstBossAssaultJustStarted = true;
+    enemy.bossActionCount = 0;
+    enemy.bossSkillId = undefined;
+    enemy.bossSkillTurnsRemaining = undefined;
+    enemy.bossSkillTarget = undefined;
+    enemy.bossSkillTiles = undefined;
+    enemy.alerted = true;
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    this.playerControlTurns = FIRST_BOSS_CONTROL_TURNS;
+    this.cancelAutoMove();
+    this.stopHeldMovement();
+    this.refreshPlayerControlVisual();
+    this.showStatusText(this.player.x, this.player.y, '岩缚 2 回合', '#d2e4e7');
+    this.showStatusText(enemy.x, enemy.y, '岩缚连击', '#f1be8b');
+    this.pushLog(`${enemy.name}发动第 ${enemy.firstBossAssaultPhases} 次岩缚！禁锢两回合，期间贴身双击，距离不足则追近两格。`);
+  }
+
+  private runFirstBossAssaultTurn(enemy: Enemy): void {
+    if (enemy.firstBossAssaultJustStarted) {
+      enemy.firstBossAssaultJustStarted = false;
+      return;
+    }
+
+    if (this.distance(enemy, this.player) === 1) {
+      this.showStatusText(enemy.x, enemy.y, '连击 ×2', '#f1be8b');
+      for (let hit = 0; hit < 2; hit += 1) {
+        this.enemyAttack(enemy);
+        if (this.status === 'dead') return;
+      }
+    } else {
+      let steps = 0;
+      while (steps < 2 && this.distance(enemy, this.player) > 1) {
+        const next = this.chooseEnemyStep(enemy);
+        if (!next) break;
+        enemy.x = next.x;
+        enemy.y = next.y;
+        steps += 1;
+      }
+      if (steps > 0) {
+        if (enemy.sprite) this.tweenToGrid(enemy.sprite, enemy);
+        this.showStatusText(enemy.x, enemy.y, `追击 ${steps} 格`, '#f1be8b');
+        this.pushLog(`${enemy.name}无法贴身攻击，向你追近 ${steps} 格。`);
+      }
+    }
+
+    enemy.firstBossAssaultTurns = Math.max(0, (enemy.firstBossAssaultTurns ?? 0) - 1);
+    if (enemy.firstBossAssaultTurns > 0) return;
+    if (enemy.firstBossAssaultPhases === 2) {
+      enemy.firstBossEnraged = true;
+      enemy.tint = 0xff7061;
+      enemy.sprite?.setTint(enemy.tint);
+      this.refreshBossRageVisual(enemy);
+      this.showStatusText(enemy.x, enemy.y, '狂暴 · 伤害 ×2', '#ff9382');
+      this.pushLog(`${enemy.name}的第二次岩缚结束，进入永久狂暴！普攻与落石伤害翻倍。`);
+    } else {
+      this.pushLog(`${enemy.name}的第一次岩缚结束。`);
+      // A large hit can cross both thresholds; queue the second full phase at this turn boundary.
+      this.activateFirstBossAssault(enemy);
+      enemy.firstBossAssaultJustStarted = false;
+    }
+  }
+
+  private refreshBossRageVisual(enemy: Enemy): void {
+    this.destroyBossRageEffect(enemy);
+    const ring = this.add.circle(0, 0, 26, 0xe44940, 0.12)
+      .setStrokeStyle(3, 0xff7967, 0.9).setBlendMode(Phaser.BlendModes.ADD);
+    const outer = this.add.circle(0, 0, 31)
+      .setStrokeStyle(2, 0xffb19a, 0.6).setBlendMode(Phaser.BlendModes.ADD);
+    enemy.rageEffect = this.add.container(enemy.x * TILE_SIZE + 16, enemy.y * TILE_SIZE + 16, [ring, outer])
+      .setDepth(8);
+    this.actorGroup.add(enemy.rageEffect);
+    this.tweens.add({
+      targets: [ring, outer], alpha: { from: 0.35, to: 1 }, scale: { from: 0.9, to: 1.12 },
+      duration: 420, yoyo: true, repeat: -1,
+    });
+  }
+
+  private destroyBossRageEffect(enemy: Enemy): void {
+    if (!enemy.rageEffect) return;
+    this.tweens.killTweensOf(enemy.rageEffect);
+    this.tweens.killTweensOf(enemy.rageEffect.list);
+    enemy.rageEffect.destroy(true);
+    enemy.rageEffect = undefined;
+  }
+
+  private startSecondBossTrial(boss: Enemy): boolean {
+    const occupied = new Set(this.enemies.map((enemy) => `${enemy.x},${enemy.y}`));
+    occupied.add(`${this.player.x},${this.player.y}`);
+    const corners = getSecondBossTrialCorners(boss, this.dungeon.tiles, occupied);
+    if (corners.length !== 4) return false;
+    boss.hp = 1;
+    boss.secondBossTrial = { phase: 'trial', turns: 0, justTriggered: true };
+    boss.bossSkillId = undefined;
+    boss.bossSkillTiles = undefined;
+    boss.bossSkillTarget = undefined;
+    boss.bossSkillTurnsRemaining = undefined;
+    boss.bleedDamage = undefined;
+    boss.bleedTurns = 0;
+    this.cancelAutoMove();
+    this.stopHeldMovement();
+    if (boss.sprite) {
+      this.tweens.killTweensOf(boss.sprite);
+      boss.sprite.setPosition(boss.x * TILE_SIZE + 16, boss.y * TILE_SIZE + 16);
+    }
+    this.tweens.killTweensOf(this.bossSkillGraphics);
+    this.bossSkillGraphics.clear().setAlpha(1);
+    const stats = getSecondBossGuardianStats(boss.maxHp, boss.attack, boss.defense);
+    const template = getRegionTheme(this.floor).enemies[2];
+    for (const [index, point] of corners.entries()) {
+      const guardian: Enemy = {
+        ...stats, ...point, maxHp: stats.hp, reward: 0,
+        id: `tidal-guardian-${index}`, name: '潮汐封印卫', frame: template.frame,
+        tint: 0x8ee8e3, scale: template.scale, alerted: true, isBoss: false,
+        summonedByBoss: true, trialGuardian: true,
+      };
+      guardian.sprite = this.add.sprite(point.x * TILE_SIZE + 16, point.y * TILE_SIZE + 16, 'tiny-dungeon', guardian.frame)
+        .setScale(guardian.scale).setTint(guardian.tint).setDepth(7).setAlpha(0);
+      this.actorGroup.add(guardian.sprite);
+      this.enemies.push(guardian);
+      this.tweens.add({ targets: guardian.sprite, alpha: 1, duration: 350 });
+    }
+    this.renderSecondBossTrial(boss, corners);
+    this.pushLog('溺亡司祭锁至 1 血，四角封印启动！45 回合内击杀全部潮汐封印卫。');
+    return true;
+  }
+
+  private finishSecondBossTrialTurn(): void {
+    const boss = this.enemies.find((enemy) => enemy.secondBossTrial);
+    if (!boss?.secondBossTrial) return;
+    const guardians = this.enemies.filter((enemy) => enemy.trialGuardian).length;
+    const outcome = advanceSecondBossTrial(boss.secondBossTrial, guardians);
+    this.updateSecondBossCounter(boss);
+    if (this.status !== 'active') return;
+    if (outcome === 'success') {
+      this.pushLog(`四角封印已破除，试炼用时 ${boss.secondBossTrial.turns} 回合。`);
+      boss.secondBossTrial = undefined;
+      boss.hp = 0;
+      this.defeatEnemy(boss);
+    } else if (outcome === 'failed') {
+      this.cancelAutoMove();
+      this.stopHeldMovement();
+      for (const enemy of this.enemies) {
+        if (enemy === boss) continue;
+        this.destroyBossShield(enemy);
+        this.destroyBossHealingEffect(enemy);
+        this.destroyEliteEffect(enemy);
+        if (enemy.sprite) this.tweens.killTweensOf(enemy.sprite);
+        enemy.sprite?.destroy();
+      }
+      this.enemies = [boss];
+      this.spawnSecondBossStorm();
+      this.pushLog('45 回合已尽，试炼失败！封印卫消失，灭绝飓风开始追杀。');
+    } else if (outcome === 'storm') {
+      this.runSecondBossStorm(boss);
+    }
+  }
+
+  private renderSecondBossTrial(boss: Enemy, corners: Point[]): void {
+    const boundary = this.add.graphics().lineStyle(2, 0x6ed9dc, 0.6);
+    boundary.strokeRect(corners[0].x * TILE_SIZE, corners[0].y * TILE_SIZE, 11 * TILE_SIZE, 11 * TILE_SIZE);
+    for (const point of corners) {
+      boundary.lineStyle(3, 0xa4fff2, 0.95).strokeRect(point.x * TILE_SIZE + 2, point.y * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+    }
+    const seal = this.add.circle(boss.x * TILE_SIZE + 16, boss.y * TILE_SIZE + 16, 29, 0x4cc7d5, 0.1)
+      .setStrokeStyle(3, 0xabf9ef, 0.9).setBlendMode(Phaser.BlendModes.ADD);
+    this.trialCounter = this.add.text(boss.x * TILE_SIZE + 16, boss.y * TILE_SIZE - 38, '', {
+      fontFamily: 'Microsoft YaHei, sans-serif', fontSize: '20px', color: '#c6fff4',
+      backgroundColor: '#102a30', padding: { x: 7, y: 5 },
+    }).setOrigin(0.5);
+    this.trialVisual = this.add.container(0, 0, [boundary, seal, this.trialCounter]).setDepth(19);
+    this.objectGroup.add(this.trialVisual);
+    this.tweens.add({ targets: seal, alpha: { from: 0.4, to: 1 }, duration: 650, yoyo: true, repeat: -1 });
+    this.updateSecondBossCounter(boss);
+  }
+
+  private updateSecondBossCounter(boss: Enemy): void {
+    const trial = boss.secondBossTrial;
+    if (!trial) return;
+    const guardians = this.enemies.filter((enemy) => enemy.trialGuardian).length;
+    this.trialCounter?.setText(trial.phase === 'storm'
+      ? `飓风追杀 · ${trial.turns} 回合`
+      : `锁血 ${trial.turns}/${SECOND_BOSS_TRIAL_TURNS} · 余 ${guardians}`);
+    if (this.trialCounter) {
+      const halfWidth = this.trialCounter.displayWidth / 2;
+      this.trialCounter.setX(Phaser.Math.Clamp(boss.x * TILE_SIZE + 16, halfWidth + 4, MAP_WIDTH * TILE_SIZE - halfWidth - 4));
+    }
+    if (trial.phase === 'storm') this.trialCounter?.setColor('#ffaaa0');
+  }
+
+  private spawnSecondBossStorm(): void {
+    for (const point of getSecondBossStormSpawns(this.dungeon.tiles)) {
+      const swirl = this.add.graphics().setBlendMode(Phaser.BlendModes.ADD);
+      const rotation = { phase: 0 };
+      const draw = () => {
+        swirl.clear().fillStyle(0x65c8df, 0.18).fillTriangle(-22, -34, 22, -34, 0, 8);
+        for (let strand = 0; strand < 2; strand += 1) {
+          swirl.lineStyle(strand ? 2 : 3, strand ? 0x50b2dd : 0xcefbff, strand ? 0.65 : 0.92).beginPath();
+          for (let step = 0; step <= 72; step += 1) {
+            const height = step / 72;
+            const radius = 3 + height * 19;
+            const angle = height * Math.PI * 8 + rotation.phase + strand * Math.PI;
+            const x = Math.cos(angle) * radius;
+            const y = 7 - height * 42 + Math.sin(angle) * radius * 0.2;
+            if (step === 0) swirl.moveTo(x, y);
+            else swirl.lineTo(x, y);
+          }
+          swirl.strokePath();
+        }
+      };
+      draw();
+      const effect = this.add.container(point.x * TILE_SIZE + 16, point.y * TILE_SIZE + 16, [swirl]).setDepth(18);
+      this.objectGroup.add(effect);
+      this.stormWinds.push({ ...point, effect });
+      this.tweens.add({ targets: rotation, phase: Math.PI * 2, duration: 700, repeat: -1, onUpdate: draw });
+      effect.once(Phaser.GameObjects.Events.DESTROY, () => this.tweens.killTweensOf(rotation));
+    }
+  }
+
+  private runSecondBossStorm(boss: Enemy): void {
+    for (const wind of this.stormWinds) {
+      const next = getStormStep(this.dungeon.tiles, wind, this.player);
+      wind.x = next.x;
+      wind.y = next.y;
+      this.tweenToGrid(wind.effect, wind);
+      if (this.distance(wind, this.player) > 1) continue;
+      this.damagePlayer(Math.max(6, Math.ceil(boss.attack * 0.4)),
+        (damage) => `灭绝飓风命中，造成 ${damage} 点伤害。`, 'boss-skill', '飓风');
+      if (this.status === 'dead') return;
+    }
+  }
+
+  private clearSecondBossTrialVisuals(): void {
+    if (this.trialVisual) {
+      this.tweens.killTweensOf(this.trialVisual.list);
+      this.trialVisual.destroy(true);
+      this.trialVisual = undefined;
+      this.trialCounter = undefined;
+    }
+    for (const wind of this.stormWinds) {
+      this.tweens.killTweensOf(wind.effect);
+      this.tweens.killTweensOf(wind.effect.list);
+      wind.effect.destroy(true);
+    }
+    this.stormWinds = [];
   }
 
   private createEliteEffect(enemy: Enemy): void {
@@ -2302,7 +2840,7 @@ export class GameScene extends Phaser.Scene {
       this.pushLog(`你避开了「${skill.name}」。`);
       return;
     }
-    const damage = getBossSkillDamage(skill, enemy.attack, this.totalDefense);
+    const damage = getBossSkillDamage(skill, enemy.attack, this.totalDefense) * (enemy.firstBossEnraged ? 2 : 1);
     const hitResult = this.damagePlayer(
       damage,
       (actualDamage) => `「${skill.name}」命中，造成 ${actualDamage} 点伤害。`,
@@ -3227,6 +3765,11 @@ export class GameScene extends Phaser.Scene {
     if (this.status !== 'active') return;
     const item = this.inventory[index];
     if (!item) return;
+    if (this.adventureMode === 'trial' && (item.type === 'weapon' || item.type === 'armor')) {
+      this.pushLog('本次试炼装备已锁定，回城后可更换。');
+      this.emitUiState();
+      return;
+    }
 
     if (item.type === 'scroll') {
       this.escapeDungeon();
@@ -3289,7 +3832,8 @@ export class GameScene extends Phaser.Scene {
       return;
     }
 
-    this.emitUiState();
+    if (this.adventureMode === 'trial' && item.type === 'potion') this.finishTurn();
+    else this.emitUiState();
   }
 
   private escapeDungeon(): void {
@@ -3342,6 +3886,11 @@ export class GameScene extends Phaser.Scene {
 
   private returnToTown(): void {
     if (this.status !== 'active' || !this.bossStage || !this.bossDefeated) return;
+    if (this.adventureMode === 'trial') {
+      const carried = this.saveGildedEquipment();
+      this.completeReturn(`试炼第一层完成，带回 ${this.gold} 枚古币与 ${carried.length} 件装备。`);
+      return;
+    }
     this.unlockRegionAtFloor(this.floor);
     this.completeReturn(`守层远征完成，你安全带回 ${this.gold} 枚古币。`);
   }
@@ -3531,6 +4080,7 @@ export class GameScene extends Phaser.Scene {
       enemy.sprite?.setVisible(visible);
       enemy.shieldEffect?.setVisible(visible);
       enemy.healingEffect?.setVisible(visible);
+      enemy.rageEffect?.setVisible(visible);
       enemy.eliteEffect?.setVisible(visible);
     }
     for (const chest of this.chests) chest.sprite?.setVisible(this.visible.has(`${chest.x},${chest.y}`));
@@ -3596,6 +4146,7 @@ export class GameScene extends Phaser.Scene {
 
   private continueAfterBoss(): void {
     if (!this.bossExitChoice || this.status !== 'active' || !this.bossStage || !this.bossDefeated) return;
+    if (this.adventureMode === 'trial') return;
     this.bossExitChoice = false;
     const nextStage = advanceStage(this.floor, true);
     this.floor = nextStage.floor;
@@ -3683,6 +4234,7 @@ export class GameScene extends Phaser.Scene {
       adventureMode: this.adventureMode,
       areaLabel: this.inTown
         ? '灰炉镇'
+        : this.adventureMode === 'trial' ? '无尽试炼 · 第 1 层'
         : `${this.adventureMode === 'heroic' ? '英雄 · ' : ''}${this.bossStage ? `第 ${this.floor} 层守门大殿` : `第 ${this.floor} 层`}`,
       hp: this.player.hp,
       maxHp: this.totalMaxHp,
@@ -3748,10 +4300,19 @@ export class GameScene extends Phaser.Scene {
         maxHp: boss.maxHp,
         shield: boss.shield ?? 0,
         maxShield: boss.maxShield ?? 0,
-        secondPhase: Boolean(boss.bossSecondPhase),
+        secondPhase: Boolean(boss.bossSecondPhase || boss.trialWarden?.secondPhase),
+        wardenStatus: boss.trialWarden ? getTrialWardenStatus(boss.trialWarden) : undefined,
         healingTurns: boss.bossHealingTurns ?? 0,
+        assaultTurns: boss.firstBossAssaultTurns ?? 0,
+        enraged: Boolean(boss.firstBossEnraged),
         chargingSkill: boss.bossSkillId ? getBossSkillById(boss.bossSkillId).name : undefined,
         chargingTurns: boss.bossSkillId ? boss.bossSkillTurnsRemaining ?? 1 : undefined,
+        trial: boss.secondBossTrial ? {
+          phase: boss.secondBossTrial.phase,
+          turns: boss.secondBossTrial.turns,
+          limit: SECOND_BOSS_TRIAL_TURNS,
+          guardians: this.enemies.filter((enemy) => enemy.trialGuardian).length,
+        } : undefined,
       } : null,
     };
     window.dispatchEvent(new CustomEvent<UiState>(UI_EVENT, { detail: state }));

@@ -80,6 +80,9 @@ const bossShieldFill = getElement('boss-shield-fill');
 const bossShieldValue = getElement('boss-shield-value');
 const bossHealing = getElement('boss-healing');
 const bossHealingTurns = getElement('boss-healing-turns');
+const bossTrial = getElement('boss-trial');
+const bossTrialPhase = getElement('boss-trial-phase');
+const bossTrialTurns = getElement('boss-trial-turns');
 const bossSkillWarning = getElement('boss-skill-warning');
 const bossSkillName = getElement('boss-skill-name');
 const playerEffects = getElement('player-effects');
@@ -135,6 +138,7 @@ const regionMapOptions = getElement('region-map-options');
 const dismissRegionMapButton = getElement<HTMLButtonElement>('dismiss-region-map-button');
 const normalRegionModeButton = getElement<HTMLButtonElement>('normal-region-mode');
 const heroicRegionModeButton = getElement<HTMLButtonElement>('heroic-region-mode');
+const trialRegionModeButton = getElement<HTMLButtonElement>('trial-region-mode');
 const merchantModal = getElement('merchant-modal');
 const merchantOffers = getElement('merchant-offers');
 const dismissMerchantButton = getElement<HTMLButtonElement>('dismiss-merchant-button');
@@ -307,7 +311,7 @@ function renderEquipmentValue(
   element.replaceChildren(title, stats, score);
 }
 
-function renderInventory(items: Item[], capacity: number): void {
+function renderInventory(items: Item[], capacity: number, equipmentLocked: boolean): void {
   bagGrid.replaceChildren();
 
   for (let index = 0; index < capacity; index += 1) {
@@ -322,8 +326,9 @@ function renderInventory(items: Item[], capacity: number): void {
       const itemButton = document.createElement('button');
       itemButton.type = 'button';
       itemButton.className = 'bag-item-button';
-      itemButton.disabled = item.type === 'material';
-      itemButton.title = item.type === 'material'
+      itemButton.disabled = item.type === 'material' || (equipmentLocked && Boolean(tier));
+      itemButton.title = equipmentLocked && tier ? `${item.name}：试炼装备锁定`
+        : item.type === 'material'
         ? `${item.name}：材料不能直接使用或装备`
         : `${item.name}：${item.description}`;
       itemButton.setAttribute('aria-label', `${item.name}，${item.description}${quantity > 1 ? `，数量 ${quantity}` : ''}`);
@@ -859,26 +864,32 @@ function renderRegionMap(state: UiState): void {
   regionMapOptions.replaceChildren();
   normalRegionModeButton.classList.toggle('is-selected', state.regionMapMode === 'normal');
   heroicRegionModeButton.classList.toggle('is-selected', state.regionMapMode === 'heroic');
+  trialRegionModeButton.classList.toggle('is-selected', state.regionMapMode === 'trial');
+  for (const [button, mode] of [[normalRegionModeButton, 'normal'], [heroicRegionModeButton, 'heroic'], [trialRegionModeButton, 'trial']] as const) {
+    button.setAttribute('aria-pressed', String(state.regionMapMode === mode));
+  }
   heroicRegionModeButton.disabled = !state.heroicUnlocked;
   heroicRegionModeButton.title = state.heroicUnlocked ? '英雄远征' : '击败第五区域首领后解锁';
   if (!options) return;
 
   for (const option of options) {
     const heroic = option.mode === 'heroic';
+    const trial = option.mode === 'trial';
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `region-map-option${heroic ? ' is-heroic' : ''}`;
+    button.className = `region-map-option${heroic ? ' is-heroic' : ''}${trial ? ' is-trial' : ''}`;
     button.innerHTML = `
       <span class="map-thumbnail">
-        <i data-lucide="${heroic ? 'swords' : 'map'}" aria-hidden="true"></i>
+        ${trial ? `<span class="trial-map-portrait" style="background-image: url('${TINY_DUNGEON_SHEET}')"></span>` : `<i data-lucide="${heroic ? 'swords' : 'map'}" aria-hidden="true"></i>`}
         <b>${String(option.index + 1).padStart(2, '0')}</b>
       </span>
       <span class="map-copy">
-        <small>${heroic ? '英雄' : '普通'} · 第 ${option.index + 1} 区间</small>
+        <small>${trial ? '无尽试炼 · 第 1 层' : `${heroic ? '英雄' : '普通'} · 第 ${option.index + 1} 区间`}</small>
         <strong>${option.name}</strong>
-        <em>${option.startFloor}～${option.endFloor} 层${heroic ? ` · 威胁 ${option.difficultyStart}～${option.difficultyEnd}` : ''}</em>
+        <em>${trial ? '断誓铁卫 · 重甲 / 冲锋 / 回响' : `${option.startFloor}～${option.endFloor} 层${heroic ? ` · 威胁 ${option.difficultyStart}～${option.difficultyEnd}` : ''}`}</em>
+        ${option.trialSnapshot ? `<em class="trial-preview-stats">生命 ${option.trialSnapshot.boss.hp} · 攻击 ${option.trialSnapshot.boss.attack} · 防御 ${option.trialSnapshot.boss.defense}</em>` : ''}
       </span>
-      <span class="map-start">${heroic ? '英雄 · ' : ''}第 ${option.startFloor} 层</span>
+      <span class="map-start">${trial ? '挑战' : `${heroic ? '英雄 · ' : ''}第 ${option.startFloor} 层`}</span>
     `;
     button.addEventListener('click', () => sendCommand({
       action: 'start-region',
@@ -976,18 +987,30 @@ function renderState(state: UiState): void {
   }
   bagCount.textContent = `${state.inventory.length} / ${state.inventoryCapacity}`;
   bagSection.hidden = state.inTown;
-  logTitle.textContent = state.inTown ? '城镇纪事' : '洞窟回声';
+  logTitle.textContent = state.inTown ? '城镇纪事' : state.adventureMode === 'trial' ? '试炼战报' : '洞窟回声';
   playerEffects.hidden = state.playerControlTurns <= 0 && state.playerBurnTurns <= 0;
   playerControlEffect.hidden = state.playerControlTurns <= 0;
   playerControlEffect.querySelector('b')!.textContent = `禁锢 · ${state.playerControlTurns} 回合`;
   playerBurnEffect.hidden = state.playerBurnTurns <= 0;
   playerBurnEffect.querySelector('b')!.textContent = `灼烧 · ${state.playerBurnTurns} 回合 · ${state.playerBurnDamage}/回合`;
 
-  bossEncounter.hidden = !state.boss;
+  bossEncounter.hidden = !state.boss || Boolean(state.boss.trial);
+  const inTrial = state.adventureMode === 'trial';
+  const gameStage = getElement('game-stage');
+  bossEncounter.classList.toggle('is-trial', inTrial);
+  if (inTrial && bossEncounter.parentElement === gameStage) gameStage.before(bossEncounter);
+  else if (!inTrial && bossEncounter.parentElement !== gameStage) gameStage.prepend(bossEncounter);
   bossExitModal.hidden = !state.bossExitChoice;
+  bossExitModal.classList.toggle('is-trial', inTrial);
+  bossExitContinueButton.hidden = inTrial;
+  getElement('boss-exit-title').textContent = inTrial ? '试炼第一层完成' : '前路或归途';
+  bossExitModal.querySelector('p')!.textContent = inTrial ? '镇印竞技场 · 首领已击败' : '守层远征完成';
   if (state.boss) {
-    bossName.textContent = state.boss.secondPhase ? `${state.boss.name} · 二阶段` : state.boss.name;
+    bossName.textContent = state.boss.enraged
+      ? `${state.boss.name} · 狂暴`
+      : state.boss.secondPhase ? `${state.boss.name} · 二阶段` : state.boss.name;
     bossEncounter.classList.toggle('is-second-phase', state.boss.secondPhase);
+    bossEncounter.classList.toggle('is-enraged', state.boss.enraged);
     bossEncounter.classList.toggle('is-healing', state.boss.healingTurns > 0);
     bossHp.textContent = `${state.boss.hp} / ${state.boss.maxHp}`;
     bossHealthFill.style.width = `${Math.max(0, (state.boss.hp / state.boss.maxHp) * 100)}%`;
@@ -996,15 +1019,29 @@ function renderState(state: UiState): void {
     bossShieldValue.textContent = `${state.boss.shield} / ${state.boss.maxShield}`;
     bossHealing.hidden = state.boss.healingTurns <= 0;
     bossHealingTurns.textContent = `${state.boss.healingTurns} 回合`;
-    bossSkillWarning.hidden = !state.boss.chargingSkill;
-    bossSkillName.textContent = state.boss.chargingSkill
-      ? `${state.boss.chargingSkill} · ${state.boss.chargingTurns ?? 1} 回合后释放 · 躲开高亮格`
-      : '';
+    bossTrial.hidden = !state.boss.trial;
+    bossTrial.classList.toggle('is-storm', state.boss.trial?.phase === 'storm');
+    if (state.boss.trial) {
+      const trial = state.boss.trial;
+      bossTrialPhase.textContent = trial.phase === 'storm' ? `${state.boss.name} · 试炼失败 · 无敌` : `${state.boss.name} · 锁血 1 · 守卫 ${trial.guardians}/4`;
+      bossTrialTurns.textContent = trial.phase === 'storm' ? `${trial.turns} 回合` : `${trial.turns}/${trial.limit} 回合`;
+    }
+    const warnings: string[] = [];
+    if (state.boss.wardenStatus) warnings.push(state.boss.wardenStatus);
+    if (state.boss.assaultTurns > 0) warnings.push(`岩缚连击 · 剩余 ${state.boss.assaultTurns} 回合`);
+    if (state.boss.enraged) warnings.push('狂暴 · 伤害 ×2');
+    if (state.boss.chargingSkill) {
+      warnings.push(`${state.boss.chargingSkill} · ${state.boss.chargingTurns ?? 1} 回合后释放 · 躲开高亮格`);
+    }
+    bossSkillWarning.hidden = warnings.length === 0;
+    bossSkillName.textContent = warnings.join('；');
   } else {
+    bossEncounter.classList.remove('is-enraged');
     bossEncounter.classList.remove('is-second-phase');
     bossEncounter.classList.remove('is-healing');
     bossShield.hidden = true;
     bossHealing.hidden = true;
+    bossTrial.hidden = true;
     bossSkillWarning.hidden = true;
     bossSkillName.textContent = '';
   }
@@ -1016,7 +1053,7 @@ function renderState(state: UiState): void {
   renderRegionMap(state);
   renderMerchant(state);
   renderDiscard(state);
-  renderInventory(state.inventory, state.inventoryCapacity);
+  renderInventory(state.inventory, state.inventoryCapacity, inTrial);
   renderPlayerSkills(state);
   gildedStatus.replaceChildren(
     ...state.pendingGilded.map((equipment) => {
@@ -1088,6 +1125,7 @@ dismissBestiaryButton.addEventListener('click', () => sendCommand({ action: 'dis
 dismissRegionMapButton.addEventListener('click', () => sendCommand({ action: 'dismiss-region-map' }));
 normalRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'normal' }));
 heroicRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'heroic' }));
+trialRegionModeButton.addEventListener('click', () => sendCommand({ action: 'select-region-mode', mode: 'trial' }));
 dismissMerchantButton.addEventListener('click', () => sendCommand({ action: 'dismiss-merchant' }));
 dismissDiscardButton.addEventListener('click', () => sendCommand({ action: 'dismiss-discard' }));
 confirmDiscardButton.addEventListener('click', () => sendCommand({ action: 'confirm-discard' }));

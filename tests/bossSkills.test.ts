@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { createRandom, generateBossArena } from '../src/game/dungeon';
 import {
+  FIRST_BOSS_CONTROL_TURNS,
   FOURTH_BOSS_BURN_TURNS,
   FOURTH_BOSS_CONTROL_TURNS,
   FOURTH_BOSS_HEAL_TURNS,
@@ -13,6 +15,7 @@ import {
   getThirdBossReleaseSummonCount,
   resolveShieldDamage,
   shouldEnterBossSecondPhase,
+  shouldStartFirstBossAssault,
   shouldStartFourthBossHealing,
 } from '../src/game/bossSkills';
 
@@ -57,6 +60,33 @@ describe('regional boss skills', () => {
     const skill = getBossSkill(20);
     expect(getBossSkillDamage(skill, 18, 0)).toBeGreaterThan(getBossSkillDamage(skill, 18, 12));
     expect(getBossSkillDamage(skill, 18, 999)).toBe(2);
+    expect(getBossSkillDamage(skill, 18, 12)).toBe(20);
+  });
+
+  it.each([
+    [38, 0, 37],
+    [38, 20, 31],
+    [91, 0, 86],
+    [91, 20, 81],
+    [38, 999, 2],
+  ])('reduces meteor impact damage by one third at attack %i and defense %i', (attack, defense, expected) => {
+    expect(getBossSkillDamage(getBossSkill(40), attack, defense)).toBe(expected);
+  });
+
+  it('fills more than five clusters worth of tiles in the boss arena without blocking the escape', () => {
+    const tiles = generateBossArena(1).tiles;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const random = createRandom(seed);
+      const target = { x: 14, y: 10 };
+      const blocked = new Set(['15,10', '14,9', '14,11']);
+      const danger = getBossSkillTiles(getBossSkill(40), target, tiles, random.next, blocked);
+      expect(danger.length).toBeGreaterThan(35);
+      expect(danger.length).toBeLessThanOrEqual(56);
+      expect(new Set(danger.map((point) => `${point.x},${point.y}`)).size).toBe(danger.length);
+      expect(danger.every((point) => tiles[point.y]?.[point.x] === 1)).toBe(true);
+      expect(danger).toContainEqual(target);
+      expect(danger).not.toContainEqual({ x: 13, y: 10 });
+    }
   });
 
   it('adds capped summons and a proportional shield only to the fifth boss', () => {
@@ -72,6 +102,29 @@ describe('regional boss skills', () => {
     expect(getThirdBossReleaseSummonCount(30, 3)).toBe(2);
     expect(getThirdBossReleaseSummonCount(30, 4)).toBe(1);
     expect(getThirdBossReleaseSummonCount(30, 5)).toBe(0);
+  });
+
+  it.each([135, 465])('triggers first boss control at both health thirds for max HP %i', (maxHp) => {
+    expect(FIRST_BOSS_CONTROL_TURNS).toBe(2);
+    expect(shouldStartFirstBossAssault(10, maxHp * 2 / 3 + 1, maxHp, 0)).toBe(false);
+    expect(shouldStartFirstBossAssault(10, maxHp * 2 / 3, maxHp, 0)).toBe(true);
+    expect(shouldStartFirstBossAssault(10, maxHp / 3 + 1, maxHp, 1)).toBe(false);
+    expect(shouldStartFirstBossAssault(10, maxHp / 3, maxHp, 1)).toBe(true);
+    expect(shouldStartFirstBossAssault(10, 1, maxHp, 2)).toBe(false);
+  });
+
+  it('does not lock first boss health or apply its control thresholds to other regions', () => {
+    expect(shouldStartFirstBossAssault(10, 0, 135, 0)).toBe(false);
+    expect(shouldStartFirstBossAssault(10, -10, 135, 1)).toBe(false);
+    expect(shouldStartFirstBossAssault(10, 0, 0, 0)).toBe(false);
+    for (const floor of [20, 30, 40, 50]) {
+      expect(shouldStartFirstBossAssault(floor, 1, 135, 0)).toBe(false);
+    }
+  });
+
+  it('keeps both first boss thresholds eligible when a nonlethal hit crosses both', () => {
+    expect(shouldStartFirstBossAssault(10, 30, 135, 0)).toBe(true);
+    expect(shouldStartFirstBossAssault(10, 30, 135, 1)).toBe(true);
   });
 
   it('starts two invulnerable healing phases at the fourth boss health thirds', () => {

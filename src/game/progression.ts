@@ -1,3 +1,5 @@
+import { getRegionIndex } from './regions';
+
 export interface BossStats {
   hp: number;
   attack: number;
@@ -30,11 +32,12 @@ export function advanceStage(floor: number, bossStage: boolean): StageProgress {
   return { floor: floor + 1, bossStage: false };
 }
 
-export function getBossStats(floor: number): BossStats {
+export function getBossStats(floor: number, stageFloor = floor): BossStats {
+  const baseDefense = 3 + Math.floor(floor / 4);
   return {
     hp: 75 + floor * 6,
     attack: 8 + Math.ceil(floor * 0.75),
-    defense: 3 + Math.floor(floor / 4),
+    defense: getRegionIndex(stageFloor) === 3 ? Math.ceil(baseDefense * 1.2) : baseDefense,
     reward: 40 + floor * 6,
   };
 }

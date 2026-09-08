@@ -9,6 +9,7 @@ import {
   hasBossAfterFloor,
 } from '../src/game/progression';
 import { INVENTORY_CAPACITY } from '../src/game/types';
+import { getAdventureDifficultyFloor } from '../src/game/heroic';
 
 describe('boss floor progression', () => {
   it('places a boss checkpoint after every ten normal floors', () => {
@@ -29,6 +30,22 @@ describe('boss floor progression', () => {
       defense: 5,
       reward: 100,
     });
+  });
+
+  it('increases only defense for the fourth normal boss', () => {
+    expect(getBossStats(40)).toEqual({ hp: 315, attack: 38, defense: 16, reward: 280 });
+  });
+
+  it('recognizes the fourth heroic boss by stage rather than difficulty floor', () => {
+    const difficulty = getAdventureDifficultyFloor('heroic', 40);
+    expect(getBossStats(difficulty, 40)).toEqual({ hp: 735, attack: 91, defense: 36, reward: 700 });
+  });
+
+  it('preserves the defense of the other normal and heroic bosses', () => {
+    const stages = [10, 20, 30, 50];
+    expect(stages.map((floor) => getBossStats(floor).defense)).toEqual([5, 8, 10, 15]);
+    expect(stages.map((floor) => getBossStats(getAdventureDifficultyFloor('heroic', floor), floor).defense))
+      .toEqual([19, 23, 26, 34]);
   });
 
   it('lets boss basic attacks penetrate part of player defense', () => {

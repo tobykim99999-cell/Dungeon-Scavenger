@@ -27,6 +27,7 @@ export interface ShieldDamageResult {
   remainingShield: number;
 }
 
+export const FIRST_BOSS_CONTROL_TURNS = 2;
 export const FOURTH_BOSS_CONTROL_TURNS = 2;
 export const FOURTH_BOSS_BURN_TURNS = 3;
 export const FOURTH_BOSS_HEAL_TURNS = 3;
@@ -42,7 +43,7 @@ const BOSS_SKILLS: readonly BossSkillDefinition[] = [
   {
     id: 'rockfall',
     name: '崩岩横断',
-    description: '震裂目标所在横排，蓄力一回合后落石轰击。',
+    description: '震裂目标所在横排，蓄力一回合后落石轰击。生命首次降至 2/3、1/3 时各发动岩缚，禁锢玩家两回合；期间贴身每回合攻击两次，距离不足则追近最多两格。第二次岩缚结束后永久狂暴，普攻与落石伤害翻倍。',
     dangerDescription: '横向 5 格',
     visual: 'quake',
     color: 0xd6a05f,
@@ -53,7 +54,7 @@ const BOSS_SKILLS: readonly BossSkillDefinition[] = [
   {
     id: 'thunder',
     name: '潮鸣天雷',
-    description: '锁定目标所在纵列，引导贯穿水雷。',
+    description: '锁定目标所在纵列，引导贯穿水雷。首次致命伤害锁至 1 血并进入无敌试炼，45 回合内击杀四角守卫，否则飓风追杀。',
     dangerDescription: '纵向 5 格',
     visual: 'lightning',
     color: 0x7edcf2,
@@ -75,8 +76,8 @@ const BOSS_SKILLS: readonly BossSkillDefinition[] = [
   {
     id: 'meteor',
     name: '陨火天坠',
-    description: '召来五片密集的不规则火雨，命中后造成禁锢与持续灼烧。每损失三分之一生命会进入无敌再生。',
-    dangerDescription: '五片不规则火球区域',
+    description: '召来八片密集的不规则火雨，命中后造成禁锢与持续灼烧。每损失三分之一生命会进入无敌再生。',
+    dangerDescription: '八片不规则火球区域',
     visual: 'fire',
     color: 0xff7048,
     damageMultiplier: 1.4,
@@ -207,7 +208,7 @@ function getMeteorBarrageTiles(
   }
 
   const centers: Point[] = [{ ...target }];
-  while (centers.length < 5) {
+  while (centers.length < 8) {
     const candidates = walkable.filter((point) => centers.every((center) =>
       Math.abs(point.x - center.x) + Math.abs(point.y - center.y) >= 4,
     ));
@@ -245,7 +246,8 @@ export function getBossSkillDamage(
 ): number {
   const rawDamage = Math.round(bossAttack * skill.damageMultiplier) + 2;
   const mitigation = Math.floor(playerDefense * skill.defenseMultiplier);
-  return Math.max(2, rawDamage - mitigation);
+  const damage = Math.max(2, rawDamage - mitigation);
+  return skill.id === 'meteor' ? Math.max(2, Math.round(damage * 2 / 3)) : damage;
 }
 
 export function getBossChargeReinforcement(
@@ -268,6 +270,16 @@ export function getBossChargeReinforcement(
 export function getThirdBossReleaseSummonCount(floor: number, activeSummons: number): number {
   if (getRegionIndex(floor) !== THIRD_BOSS_REGION_INDEX) return 0;
   return Math.min(2, Math.max(0, THIRD_BOSS_SUMMON_CAP - Math.max(0, Math.floor(activeSummons))));
+}
+
+export function shouldStartFirstBossAssault(
+  floor: number,
+  hp: number,
+  maxHp: number,
+  triggeredPhases: number,
+): boolean {
+  if (getRegionIndex(floor) !== 0 || hp <= 0 || maxHp <= 0 || triggeredPhases >= 2) return false;
+  return hp * 3 <= maxHp * (triggeredPhases === 0 ? 2 : 1);
 }
 
 export function shouldStartFourthBossHealing(

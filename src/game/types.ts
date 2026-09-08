@@ -5,9 +5,11 @@ import type { PlayerSkillId } from './playerSkills';
 import type { RefinedMaterialBalance } from './dismantling';
 import type { CraftingLevel, CraftingRecipe } from './crafting';
 import type { VaultEquipment } from './gilding';
+import type { SecondBossTrial } from './secondBossTrial';
+import type { TrialSnapshot, TrialWarden } from './trial';
 
 export type RunStatus = 'waiting' | 'town' | 'active' | 'dead' | 'escaped';
-export type AdventureMode = 'normal' | 'heroic';
+export type AdventureMode = 'normal' | 'heroic' | 'trial';
 export type ItemType = 'potion' | 'weapon' | 'armor' | 'scroll' | 'material';
 export type Rarity = 'common' | 'uncommon' | 'rare';
 export type EquipmentTier = 'common' | 'gold' | 'dark-gold' | 'purple';
@@ -135,6 +137,7 @@ export interface RegionOption {
   mode: AdventureMode;
   difficultyStart: number;
   difficultyEnd: number;
+  trialSnapshot?: TrialSnapshot;
 }
 
 export interface TownMaterialBalance {
@@ -237,6 +240,11 @@ export interface Enemy {
   bossSkillTiles?: Array<{ x: number; y: number }>;
   bossSkillTarget?: { x: number; y: number };
   bossSecondPhase?: boolean;
+  firstBossAssaultPhases?: number;
+  firstBossAssaultTurns?: number;
+  firstBossAssaultJustStarted?: boolean;
+  firstBossEnraged?: boolean;
+  rageEffect?: Phaser.GameObjects.Container;
   bossHealingTurns?: number;
   bossHealingJustStarted?: boolean;
   bossHealingPhases?: number;
@@ -245,6 +253,10 @@ export interface Enemy {
   maxShield?: number;
   shieldEffect?: Phaser.GameObjects.Arc;
   summonedByBoss?: boolean;
+  trialGuardian?: boolean;
+  secondBossTrial?: SecondBossTrial;
+  trialWarden?: TrialWarden;
+  wardenEffect?: Phaser.GameObjects.Container;
   elite?: boolean;
   eliteAffix?: EliteAffix;
   eliteEnraged?: boolean;
@@ -316,8 +328,12 @@ export interface UiState {
     maxShield: number;
     secondPhase: boolean;
     healingTurns: number;
+    assaultTurns: number;
+    enraged: boolean;
+    wardenStatus?: string;
     chargingSkill?: string;
     chargingTurns?: number;
+    trial?: { phase: 'trial' | 'storm'; turns: number; limit: number; guardians: number };
   } | null;
 }
 

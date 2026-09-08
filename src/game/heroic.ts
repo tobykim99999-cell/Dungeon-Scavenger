@@ -18,7 +18,7 @@ export function getHeroicDifficultyFloor(regionIndex: number, localFloor: number
 
 export function getAdventureDifficultyFloor(mode: AdventureMode, floor: number): number {
   const normalized = Math.max(1, Math.floor(floor));
-  if (mode === 'normal') return normalized;
+  if (mode !== 'heroic') return normalized;
   const regionIndex = getRegionIndex(normalized);
   const localFloor = ((normalized - 1) % 10) + 1;
   return getHeroicDifficultyFloor(regionIndex, localFloor);

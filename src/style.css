@@ -255,9 +255,51 @@ button:focus-visible {
   box-shadow: 0 0 24px rgba(255, 150, 72, 0.24);
 }
 
+.boss-encounter.is-enraged {
+  border-color: #cd6459;
+  box-shadow: 0 0 20px rgba(230, 88, 73, 0.25);
+}
+
+.boss-encounter.is-enraged .boss-heading span {
+  color: #ffac99;
+}
+
+.boss-encounter.is-trial {
+  position: static;
+  width: 100%;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  border-width: 0 0 1px;
+  border-color: #619d9c;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.boss-encounter.is-trial .boss-heading span {
+  white-space: normal;
+}
+
 .boss-healing[hidden] {
   display: none;
 }
+
+.boss-trial[hidden] { display: none; }
+.boss-trial {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+  border-bottom: 1px solid #416b72;
+  color: #a1e3dd;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.boss-trial svg { width: 13px; height: 13px; flex-shrink: 0; }
+.boss-trial strong { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.boss-trial.is-storm { color: #ffa393; border-top-color: #9c5a55; }
 
 .boss-healing {
   display: flex;
@@ -349,6 +391,16 @@ button:focus-visible {
   color: #ff998d;
   font-size: 9px;
   font-weight: 760;
+  line-height: 1.6;
+}
+
+.boss-skill-warning svg {
+  flex-shrink: 0;
+}
+
+#boss-skill-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .boss-skill-warning svg {
@@ -654,6 +706,9 @@ button:focus-visible {
   min-height: 46px;
   margin: 0;
 }
+
+.boss-exit-actions button[hidden] { display: none; }
+.boss-exit-modal.is-trial .boss-exit-actions { grid-template-columns: minmax(0, 1fr); }
 
 .boss-exit-actions svg {
   width: 16px;
@@ -1963,7 +2018,7 @@ button:focus-visible {
 
 .region-mode-switch {
   display: grid;
-  grid-template-columns: repeat(2, minmax(100px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   margin-top: 12px;
   padding: 3px;
@@ -2000,6 +2055,38 @@ button:focus-visible {
   border-color: #9a5948;
   color: #f0b07b;
   background: #33211d;
+}
+
+.region-mode-switch #trial-region-mode.is-selected {
+  border-color: #58968d;
+  color: #ade7d6;
+  background: #1c302e;
+}
+
+.trial-map-portrait {
+  display: block;
+  width: 48px;
+  height: 48px;
+  background-size: 576px 576px;
+  background-position: -96px -384px;
+  image-rendering: pixelated;
+}
+
+.region-map-option.is-trial {
+  grid-column: 1 / -1;
+  border-color: #61938d;
+}
+
+.region-map-option.is-trial .map-copy strong,
+.region-map-option.is-trial .map-copy em {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+.region-map-option.is-trial .trial-preview-stats {
+  color: #beddd6;
 }
 
 .region-mode-switch button:disabled {
@@ -3534,6 +3621,29 @@ footer {
   gap: 24px;
   color: #687174;
   font-size: 10px;
+}
+
+@media (max-width: 820px), (max-height: 640px) {
+  #region-map-modal,
+  #boss-exit-modal.is-trial {
+    position: fixed;
+    inset: 8px;
+    z-index: 100;
+    align-content: start;
+    padding: 48px 18px 18px;
+    overflow-y: auto;
+  }
+
+  #region-map-modal .region-map-options {
+    max-height: none;
+    overflow: visible;
+  }
+
+  #region-map-modal .modal-close,
+  #boss-exit-modal.is-trial .modal-close {
+    top: 10px;
+    right: 10px;
+  }
 }
 
 @media (max-width: 1120px) {
